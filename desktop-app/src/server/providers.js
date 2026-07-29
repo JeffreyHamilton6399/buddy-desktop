@@ -4,27 +4,33 @@
  * Each capability — chat, speech synthesis, speech recognition — can be served
  * either by the z-ai cloud API or by something running on this machine:
  *
- *   chat  z-ai  │ ollama    a local Ollama server
- *   tts   z-ai  │ system    the operating system's own voices (in the renderer)
- *   asr   z-ai  │ whisper   a local OpenAI-compatible transcription endpoint
+ *   chat  builtin │ ollama  │ z-ai   builtin = llama.cpp inside the app
+ *   tts   system  │ z-ai            system  = the OS's own voices, in the renderer
+ *   asr   off     │ whisper │ z-ai   whisper = a local /audio/transcriptions server
  *
- * Mix and match freely: local chat with cloud speech works, and so does the
- * reverse. When chat, tts and asr are all local, nothing leaves the machine.
+ * The defaults are the first of each: Buddy answers with its own model, speaks
+ * with the voices already on the machine, and keeps the microphone shut. Nothing
+ * to configure, no key, and nothing leaves the device. Mix and match freely —
+ * local chat with cloud speech works, and so does the reverse.
  */
 'use strict';
 
 const path = require('path');
 
-const CHAT_PROVIDERS = ['z-ai', 'ollama'];
+// 'builtin' is llama.cpp inside the app — the default, so Buddy works with no
+// key and no account the moment its model has downloaded.
+const CHAT_PROVIDERS = ['builtin', 'z-ai', 'ollama'];
 const TTS_PROVIDERS = ['z-ai', 'system'];
 // 'off' is a real choice, not a failure: local mode without a Whisper server
 // still works fine by typing, and the mic and wake word simply stay dark.
 const ASR_PROVIDERS = ['z-ai', 'whisper', 'off'];
 
+// Everything defaults to this machine: a bundled-in model, the OS's own voices,
+// and the microphone closed. Nothing to configure and nothing leaves the device.
 const DEFAULTS = {
-  chat: { provider: 'z-ai', model: '', baseUrl: 'http://127.0.0.1:11434' },
-  tts: { provider: 'z-ai', voice: 'tongtong' },
-  asr: { provider: 'z-ai', baseUrl: 'http://127.0.0.1:8000/v1', model: 'Systran/faster-whisper-small' },
+  chat: { provider: 'builtin', model: '', baseUrl: 'http://127.0.0.1:11434' },
+  tts: { provider: 'system', voice: '' },
+  asr: { provider: 'off', baseUrl: 'http://127.0.0.1:8000/v1', model: 'Systran/faster-whisper-small' },
   saveHistory: true,
 };
 
@@ -65,6 +71,11 @@ function normaliseSettings(raw) {
 /** True when no capability touches the network. */
 function isFullyLocal(settings) {
   return settings.chat.provider !== 'z-ai' && settings.tts.provider !== 'z-ai' && settings.asr.provider !== 'z-ai';
+}
+
+/** True when chat is answered by the model living inside the app. */
+function usesBuiltinModel(settings) {
+  return settings.chat.provider === 'builtin';
 }
 
 /** Which capabilities still reach the cloud — used for honest in-app copy. */
@@ -211,6 +222,7 @@ async function probeProviders(settings) {
 }
 
 module.exports = {
+  usesBuiltinModel,
   CHAT_PROVIDERS,
   TTS_PROVIDERS,
   ASR_PROVIDERS,

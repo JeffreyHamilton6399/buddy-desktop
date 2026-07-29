@@ -977,6 +977,85 @@ body.flat .panel {
   box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
 }
 
+/* ── first run: the download, and nothing to decide ─────────────────────── */
+
+.ready[hidden] {
+  display: none;
+}
+
+.bar {
+  height: 8px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--edge);
+  overflow: hidden;
+}
+
+.bar-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--warm-grad);
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.5);
+  transition: width 300ms ease;
+}
+
+/* Before the first byte arrives there is no percentage to show, so sweep. */
+.bar-fill.indeterminate {
+  width: 35% !important;
+  animation: sweep 1.5s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.ready-line {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+
+.ready-sub {
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.ready.failed .bar-fill {
+  background: linear-gradient(90deg, var(--rose), #b91c3c);
+  animation: none;
+}
+
+.ready.failed .ready-line {
+  color: #ffc9d2;
+}
+
+.link-btn {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  -webkit-app-region: no-drag;
+}
+
+.link-btn:hover {
+  color: var(--text);
+}
+
 /* mode picker */
 
 .mode-tabs {

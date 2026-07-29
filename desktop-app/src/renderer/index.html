@@ -132,23 +132,25 @@
           </svg>
         </button>
         <div class="setup-orb" aria-hidden="true"></div>
-        <h1>Hey, I'm Buddy.</h1>
-        <p class="setup-lede">Where should I do my thinking? You can change this whenever you like.</p>
+        <h1 id="ready-title">Hey, I'm Buddy.</h1>
+        <p class="setup-lede" id="ready-lede">Getting my brain ready — this happens once.</p>
 
-        <div class="mode-tabs" role="tablist">
-          <button class="mode-tab" id="tab-local" type="button" role="tab" aria-selected="false">
-            <strong>On this machine</strong>
-            <small>Nothing leaves your device</small>
-          </button>
-          <button class="mode-tab is-on" id="tab-cloud" type="button" role="tab" aria-selected="true">
-            <strong>z-ai cloud</strong>
-            <small>Just needs your key</small>
-          </button>
+        <!-- ── the whole first run: a progress bar and nothing to decide ─── -->
+        <div class="ready" id="ready">
+          <div class="bar" aria-hidden="true"><span class="bar-fill" id="bar-fill"></span></div>
+          <p class="ready-line" id="ready-line">Starting…</p>
+          <p class="ready-sub" id="ready-sub">
+            A one-time download of my language model. After this I run entirely on your machine — no
+            account, no key, and no internet needed.
+          </p>
+          <button class="setup-save" id="ready-retry" type="button" hidden>Try again</button>
+          <button class="link-btn" id="show-advanced" type="button">Use a cloud API instead</button>
         </div>
 
-        <form id="setup-form">
+        <!-- ── advanced escape hatch, hidden unless asked for ───────────── -->
+        <form id="setup-form" hidden>
           <!-- ── cloud ─────────────────────────────────────────────── -->
-          <div class="mode-pane" id="pane-cloud">
+          <div id="pane-cloud">
             <label for="setup-baseurl">API base URL</label>
             <input
               id="setup-baseurl"
@@ -166,45 +168,9 @@
             <input id="setup-key" type="password" placeholder="Your z-ai API key" spellcheck="false" autocomplete="off" />
           </div>
 
-          <!-- ── local ─────────────────────────────────────────────── -->
-          <div class="mode-pane" id="pane-local" hidden>
-            <div class="probe" id="probe-ollama">
-              <span class="probe-dot" aria-hidden="true"></span>
-              <span id="probe-text">Looking for Ollama…</span>
-            </div>
-
-            <label for="setup-model">Model</label>
-            <select id="setup-model"></select>
-            <input id="setup-model-manual" type="text" placeholder="e.g. llama3.2" spellcheck="false" hidden />
-            <p class="setup-hint" id="model-hint">
-              Buddy talks to Ollama on this machine. No key, no account, works offline.
-            </p>
-
-            <label for="setup-voice">Voice replies</label>
-            <select id="setup-voice"></select>
-            <p class="setup-hint" id="voice-hint">Uses the voices already installed on your system.</p>
-
-            <label for="setup-asr">Voice input <span class="opt">(mic + “Hey Buddy”)</span></label>
-            <select id="setup-asr">
-              <option value="off">Off — type to Buddy</option>
-              <option value="whisper">Local Whisper server</option>
-              <option value="z-ai">z-ai cloud (needs a key)</option>
-            </select>
-            <input
-              id="setup-whisper-url"
-              type="url"
-              value="http://127.0.0.1:8000/v1"
-              spellcheck="false"
-              autocomplete="off"
-              hidden
-            />
-            <p class="setup-hint" id="asr-hint">
-              With voice input off, Buddy never opens your microphone. You can turn it on later.
-            </p>
-          </div>
-
           <p class="setup-error" id="setup-error" role="alert" hidden></p>
-          <button class="setup-save" id="setup-save" type="submit">Save and start Buddy</button>
+          <button class="setup-save" id="setup-save" type="submit">Use this cloud API</button>
+          <button class="link-btn" id="hide-advanced" type="button">Back — just use the built-in model</button>
         </form>
 
         <p class="setup-note" id="setup-privacy"></p>

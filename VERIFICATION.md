@@ -254,6 +254,70 @@ known-broken.
 - The Gatekeeper and SmartScreen prompts, and whether the documented workarounds land as written.
   The builds are unsigned by design, so the warnings are expected.
 
+## v1.1.0 — the built-in model
+
+Buddy no longer asks for anything. It carries its own brain.
+
+### What was verified
+
+| Check | Result |
+| --- | --- |
+| `node-llama-cpp` under **Electron 28** | ✗ cannot even parse it — `Unexpected token 'with'`, V8 too old for ESM import attributes |
+| `node-llama-cpp` under **Electron 43** | ✓ native binding loads, generation works, Vulkan detected |
+| Electron 28 → 43 regression sweep | ✓ orb, panel, tray, `buddy://` protocol, permissions, markdown, disabled mic all unchanged |
+| Model download | ✓ 770 MB fetched with live progress, speed and ETA |
+| **Resume** after interruption | ✓ truncated the file to 640 MB; the app resumed the last 130 MB via `Range` |
+| SHA-256 verification | ✓ **caught a real mismatch** — see below |
+| Inference through the module | ✓ context carries across turns, concurrent requests serialise (`APPLE`/`BANANA` never crossed), the error path rejects cleanly, the queue survives a failure, idle unload fires |
+| First run, no settings, no key | ✓ downloads, verifies, writes local-only settings, starts the orb |
+| Chat with the built-in model in the real UI | ✓ *"I'm Buddy, a local AI assistant…"* — with no key and no account |
+| **Packaged** app, built-in model | ✓ native binary loads from `app.asar.unpacked`, replies, restores prior conversation from disk |
+| Installer size | ✓ **137 MB** (CUDA and Vulkan variants excluded; they add 500 MB+) |
+| First-run UI states | ✓ rendered deterministically against synthetic snapshots — see below |
+
+### The SHA-256 check earned its keep
+
+The first download completed all 770 MB and then **failed verification**. The cause was my own bad
+constant: I had taken the expected digest from the HTTP `etag`, which on Xet-backed HuggingFace repos
+is the **xetHash**, not the file's SHA-256.
+
+| | Value |
+| --- | --- |
+| `etag` / xetHash — what I wrongly used | `7314cd62…` |
+| `lfs.oid` from `/paths-info` — the real SHA-256 | `6f85a640…` |
+
+The re-download passed, and the file's digest was then confirmed independently outside the app. Two
+changes came out of it: the correct hash is documented in `model.js` with a warning never to use the
+etag, and a failed check now renames the file to `.badhash` rather than deleting it — if that error
+ever fires again it is far more likely to be a stale expected hash than corrupt bytes, and the file is
+the evidence.
+
+### First-run states, verified without racing a download
+
+The progress screen is the entire first-run experience, so it was tested by feeding the real renderer
+synthetic `/model` snapshots rather than hoping to screenshot a live download at the right moment:
+
+| State | Rendered |
+| --- | --- |
+| downloading | `331 MB of 770 MB · 7.2 MB/s · about 1 minute left`, bar at `43%` |
+| verifying | `Checking the download…`, bar at `100%` |
+| error | `The model server returned 503`, retry button shown, bar at `27.3%` |
+
+That last one is a fix, not just a check: the error state originally showed an **empty** bar while the
+copy underneath promised "your progress was kept". The bar now shows how far it actually got.
+
+### Honest limitations of the built-in model
+
+- **It is a 1B model.** It holds the Buddy persona and answers simple questions well; it is not
+  competent at hard reasoning, long documents or code. The README points at Ollama for anything more.
+- **Windows and Linux run on CPU.** The Vulkan and CUDA llama.cpp variants are excluded to keep the
+  installer at 137 MB, so the GPU acceleration seen during development (Vulkan, on this machine) is
+  **not** what shipped builds use. macOS gets Metal free inside its own binary. CPU inference for a 1B
+  is usable but slower than the numbers measured here.
+- **First reply of a session costs ~8 seconds** while the model loads. It then stays warm for 30
+  minutes.
+- **Memory:** roughly 1 GB resident while loaded.
+
 ## Published state
 
 The repo is live at **<https://github.com/JeffreyHamilton6399/buddy-desktop>** (public, `main`).

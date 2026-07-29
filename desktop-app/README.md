@@ -15,15 +15,14 @@ The builds are **unsigned**, so the first launch needs one extra step:
 - **Windows** — SmartScreen → **More info** → **Run anyway**
 - **Linux** — `chmod +x Buddy-*.AppImage`
 
-On first launch Buddy asks where it should run:
-
-- **On this machine** — needs [Ollama](https://ollama.com) (`ollama pull llama3.2`). Voice replies use
-  your OS's own voices, with nothing to install. Nothing leaves your device.
-- **z-ai cloud** — asks for a base URL and API key once.
+**Nothing to configure.** On first launch Buddy downloads its own model (~770 MB, once, with a
+progress bar) and then runs entirely on your machine — no key, no account, no network.
 
 Everything is stored in Buddy's own local data folder (`%APPDATA%\buddy\` ·
-`~/Library/Application Support/buddy/` · `~/.config/buddy/`), including your saved conversations in
-`chats/`. See the [repo README](../README.md#running-buddy-fully-locally) for the full local setup.
+`~/Library/Application Support/buddy/` · `~/.config/buddy/`): the model in `models/`, your saved
+conversations in `chats/`. See the
+[repo README](../README.md#using-something-other-than-the-built-in-model) for how to point Buddy at
+Ollama or a cloud API instead.
 
 ## Run from source
 
@@ -53,7 +52,9 @@ src/
     styles.css         warm dark theme
   server/
     server.js          127.0.0.1 http server, routing and auth
-    providers.js       cloud vs local dispatch: ollama, system voices, local whisper
+    providers.js       dispatch: builtin, ollama, system voices, whisper, z-ai
+    builtin.js         llama.cpp in-process — the default brain
+    model.js           downloads and verifies the model file
     history.js         saved conversations, one JSON file per chat
 scripts/
   dev.js               spawns server + electron
@@ -70,6 +71,13 @@ Useful for development; none are needed in normal use.
 | `BUDDY_CONFIG_DIR` | Where `.z-ai-config` is read from and written to. Electron sets this to `userData`. |
 | `BUDDY_TOKEN` | Fixes the `X-Buddy-Token` value instead of generating one per launch. |
 | `BUDDY_TRANSPARENT` | `1` forces transparent windows, `0` forces the opaque fallback. Only relevant on Linux. |
+
+## Notes on the built-in model
+
+- Electron must be recent enough to parse `node-llama-cpp` — Electron 28 cannot, hence Electron 43.
+- The CUDA and Vulkan llama.cpp variants are excluded from the build via `files` (500 MB+ between
+  them), so Windows and Linux run on CPU. macOS gets Metal for free inside its own binary.
+- `npm install` pulls every variant for your platform; only the CPU one is packaged.
 
 ## Notes
 

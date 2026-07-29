@@ -16,9 +16,11 @@ let boot = { port: null, token: null, wakeEnabled: true, panelVisible: false };
  * voice is spoken here in the renderer rather than streamed as audio.
  */
 let runtime = {
-  providers: { chat: 'z-ai', tts: 'z-ai', asr: 'z-ai' },
-  cloud: ['chat', 'tts', 'asr'],
-  fullyLocal: false,
+  // Matches the server's defaults, so the UI is right even in the moment before
+  // /health answers: own model, OS voices, microphone shut.
+  providers: { chat: 'builtin', tts: 'system', asr: 'off' },
+  cloud: [],
+  fullyLocal: true,
   saveHistory: true,
 };
 
@@ -986,232 +988,190 @@ function initOrb() {
 // SETUP
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * First run. There is nothing to configure and nothing to decide: Buddy fetches
+ * its model once, shows how far along it is, and starts. The cloud form exists
+ * only for people who go looking for it.
+ */
 function initSetup() {
+  const ready = $('ready');
   const form = $('setup-form');
+  const barFill = $('bar-fill');
+  const line = $('ready-line');
+  const sub = $('ready-sub');
+  const title = $('ready-title');
+  const lede = $('ready-lede');
+  const retry = $('ready-retry');
   const saveButton = $('setup-save');
   const errorBox = $('setup-error');
-  const privacyNote = $('setup-privacy');
 
-  const tabs = { local: $('tab-local'), cloud: $('tab-cloud') };
-  const panes = { local: $('pane-local'), cloud: $('pane-cloud') };
+  let polling = null;
+  let finished = false;
 
-  const baseUrlInput = $('setup-baseurl');
-  const keyInput = $('setup-key');
-  const modelSelect = $('setup-model');
-  const modelManual = $('setup-model-manual');
-  const voiceSelect = $('setup-voice');
-  const asrSelect = $('setup-asr');
-  const whisperUrl = $('setup-whisper-url');
-  const probe = $('probe-ollama');
-  const probeText = $('probe-text');
+  const MB = 1048576;
+  const asSize = (bytes) =>
+    bytes >= 1024 * MB ? (bytes / (1024 * MB)).toFixed(1) + ' GB' : Math.round(bytes / MB) + ' MB';
 
-  let mode = 'cloud';
-  let ollamaUp = false;
+  function asDuration(seconds) {
+    if (seconds == null || !Number.isFinite(seconds)) return null;
+    if (seconds < 60) return 'less than a minute left';
+    const minutes = Math.round(seconds / 60);
+    return 'about ' + minutes + ' minute' + (minutes === 1 ? '' : 's') + ' left';
+  }
 
-  function showError(message) {
-    errorBox.textContent = message;
-    errorBox.hidden = false;
+  function stopPolling() {
+    clearInterval(polling);
+    polling = null;
   }
 
   // Closing setup without finishing ends the run — Buddy has nothing to run on.
   $('setup-close').addEventListener('click', () => window.close());
 
-  // ── honest privacy copy, recomputed from the actual choices ─────────────
+  // ── the download ────────────────────────────────────────────────────────
 
-  function describePrivacy() {
-    if (mode === 'cloud') {
-      return (
-        'Your key is stored unencrypted in this app’s local data folder and sent only to z-ai. ' +
-        'Your messages, voice clips and wake-word audio go to z-ai to be processed. ' +
-        'Chats are saved on this device.'
-      );
+  function render(state) {
+    if (state.status === 'error') {
+      ready.classList.add('failed');
+      barFill.classList.remove('indeterminate');
+      // Show how far it got: the copy below promises the progress was kept, so an
+      // empty bar would contradict it.
+      barFill.style.width = `${state.percent || 0}%`;
+      title.textContent = "That didn't work.";
+      lede.textContent = 'I could not finish downloading my model.';
+      line.textContent = state.error || 'The download failed.';
+      sub.textContent =
+        'Your progress was kept, so trying again picks up where it stopped. A different network often helps.';
+      retry.hidden = false;
+      return;
     }
-    const asr = asrSelect.value;
-    if (asr === 'z-ai') {
-      return (
-        'Thinking and speaking stay on this machine. Only voice input goes to z-ai — including short ' +
-        'wake-word clips whenever a sound looks like speech. Chats are saved on this device.'
-      );
+
+    ready.classList.remove('failed');
+    retry.hidden = true;
+
+    if (state.status === 'verifying') {
+      barFill.classList.remove('indeterminate');
+      barFill.style.width = '100%';
+      line.textContent = 'Checking the download…';
+      sub.textContent = 'Making sure every byte arrived intact before I use it.';
+      return;
     }
-    if (asr === 'whisper') {
-      return (
-        'Nothing leaves this machine: thinking, speaking and listening all run locally, so ambient audio ' +
-        'stays on your device. Chats are saved on this device.'
-      );
+
+    if (state.ready) {
+      barFill.classList.remove('indeterminate');
+      barFill.style.width = '100%';
+      title.textContent = "All set. I'm Buddy.";
+      lede.textContent = 'Starting up…';
+      line.textContent = 'Ready';
+      return;
     }
-    return (
-      'Nothing leaves this machine, and with voice input off Buddy never opens your microphone. ' +
-      'Chats are saved on this device.'
-    );
+
+    // Downloading, or still waiting for the first byte.
+    const started = state.receivedBytes > 0;
+    barFill.classList.toggle('indeterminate', !started);
+    if (started) barFill.style.width = state.percent + '%';
+
+    const bits = [];
+    if (started) bits.push(asSize(state.receivedBytes) + ' of ' + asSize(state.totalBytes));
+    if (state.bytesPerSecond > 0) bits.push((state.bytesPerSecond / MB).toFixed(1) + ' MB/s');
+    const eta = asDuration(state.etaSeconds);
+    if (eta) bits.push(eta);
+    line.textContent = started ? bits.join('  ·  ') : 'Starting the download…';
   }
 
-  function refreshCopy() {
-    privacyNote.textContent = describePrivacy();
-
-    const asr = asrSelect.value;
-    whisperUrl.hidden = asr !== 'whisper';
-    if (asr === 'whisper') {
-      $('asr-hint').textContent =
-        'Point this at any OpenAI-compatible transcription server — faster-whisper-server, Speaches or LocalAI.';
-    } else if (asr === 'z-ai') {
-      $('asr-hint').textContent =
-        'Needs a z-ai key. Switch to the z-ai tab to enter one, then come back — or leave voice input off.';
-    } else {
-      $('asr-hint').textContent =
-        'With voice input off, Buddy never opens your microphone. You can turn it on later.';
-    }
-  }
-
-  function selectMode(next) {
-    mode = next;
-    for (const key of ['local', 'cloud']) {
-      const on = key === next;
-      tabs[key].classList.toggle('is-on', on);
-      tabs[key].setAttribute('aria-selected', String(on));
-      panes[key].hidden = !on;
-    }
-    refreshCopy();
-    if (next === 'cloud') keyInput.focus();
-  }
-
-  tabs.local.addEventListener('click', () => selectMode('local'));
-  tabs.cloud.addEventListener('click', () => selectMode('cloud'));
-  asrSelect.addEventListener('change', refreshCopy);
-
-  // ── what the machine actually has ──────────────────────────────────────
-
-  function loadSystemVoices() {
-    const fill = () => {
-      const voices = speechSynthesis.getVoices().filter((voice) => voice.localService !== false);
-      if (!voices.length) return false;
-      voiceSelect.replaceChildren();
-      for (const voice of voices) {
-        const option = document.createElement('option');
-        option.value = voice.name;
-        option.textContent = `${voice.name} (${voice.lang})`;
-        voiceSelect.appendChild(option);
-      }
-      const english = voices.findIndex((voice) => voice.lang.startsWith('en'));
-      voiceSelect.selectedIndex = english >= 0 ? english : 0;
-      $('voice-hint').textContent = `${voices.length} offline voice${voices.length === 1 ? '' : 's'} found on this system.`;
-      return true;
-    };
-
-    if (fill()) return;
-    // Chromium populates the voice list asynchronously on first call.
-    speechSynthesis.addEventListener('voiceschanged', fill, { once: true });
-    setTimeout(fill, 600);
-  }
-
-  async function probeOllama() {
+  async function finish() {
+    if (finished) return;
+    finished = true;
+    stopPolling();
+    // The defaults are already fully local, so nothing needs choosing — writing
+    // the settings file is what marks this install as past its first run.
     try {
-      const status = await api('/providers/status');
-      ollamaUp = status.ollama.reachable;
-
-      if (!ollamaUp) {
-        probe.className = 'probe down';
-        probeText.innerHTML =
-          'No Ollama at <code>' +
-          escapeHtml(status.ollama.baseUrl) +
-          '</code>. Install it from ollama.com, then run <code>ollama pull llama3.2</code>.';
-        modelSelect.hidden = true;
-        modelManual.hidden = false;
-        return;
-      }
-
-      const models = status.ollama.models;
-      if (!models.length) {
-        probe.className = 'probe down';
-        probeText.innerHTML = 'Ollama is running but has no models. Run <code>ollama pull llama3.2</code> first.';
-        modelSelect.hidden = true;
-        modelManual.hidden = false;
-        return;
-      }
-
-      probe.className = 'probe up';
-      probeText.textContent = `Ollama is running with ${models.length} model${models.length === 1 ? '' : 's'}.`;
-      modelSelect.hidden = false;
-      modelManual.hidden = true;
-      modelSelect.replaceChildren();
-      for (const name of models) {
-        const option = document.createElement('option');
-        option.value = name;
-        option.textContent = name;
-        modelSelect.appendChild(option);
-      }
+      await api('/settings', { chat: { provider: 'builtin' } });
     } catch (error) {
-      probe.className = 'probe down';
-      probeText.textContent = `Couldn't check for Ollama: ${error.message}`;
-      modelSelect.hidden = true;
-      modelManual.hidden = false;
+      console.warn('[buddy] could not persist settings:', error.message);
+    }
+    setTimeout(() => window.buddy.setupComplete(), 450);
+  }
+
+  async function poll() {
+    try {
+      const state = await api('/model');
+      render(state);
+      if (state.ready) await finish();
+    } catch (error) {
+      render({ status: 'error', error: error.message, receivedBytes: 0, totalBytes: 1, percent: 0 });
     }
   }
 
-  // ── save ───────────────────────────────────────────────────────────────
+  async function beginDownload() {
+    ready.classList.remove('failed');
+    retry.hidden = true;
+    render({ status: 'downloading', receivedBytes: 0, totalBytes: 1, percent: 0, bytesPerSecond: 0 });
+    try {
+      const state = await api('/model', {});
+      render(state);
+      if (state.ready) return finish();
+    } catch (error) {
+      return render({ status: 'error', error: error.message, receivedBytes: 0, totalBytes: 1, percent: 0 });
+    }
+    stopPolling();
+    polling = setInterval(poll, 500);
+  }
+
+  retry.addEventListener('click', beginDownload);
+
+  // ── the cloud escape hatch ──────────────────────────────────────────────
+
+  $('show-advanced').addEventListener('click', () => {
+    stopPolling();
+    ready.hidden = true;
+    form.hidden = false;
+    title.textContent = 'Use a cloud API';
+    lede.textContent = 'Only if you want to. The built-in model needs none of this.';
+    $('setup-key').focus();
+  });
+
+  $('hide-advanced').addEventListener('click', () => {
+    form.hidden = true;
+    ready.hidden = false;
+    errorBox.hidden = true;
+    title.textContent = "Hey, I'm Buddy.";
+    lede.textContent = 'Getting my brain ready — this happens once.';
+    beginDownload();
+  });
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     errorBox.hidden = true;
 
-    const finish = async (settings, credentials) => {
-      saveButton.disabled = true;
-      saveButton.textContent = 'Saving…';
-      try {
-        if (credentials) await api('/setup', credentials);
-        await api('/settings', settings);
-        saveButton.textContent = 'All set!';
-        window.buddy.setupComplete();
-      } catch (error) {
-        showError(error.message);
-        saveButton.disabled = false;
-        saveButton.textContent = 'Save and start Buddy';
-      }
-    };
-
-    if (mode === 'cloud') {
-      const baseUrl = baseUrlInput.value.trim();
-      const apiKey = keyInput.value.trim();
-      if (!baseUrl || !apiKey) return showError('Both the base URL and the API key are required.');
-      return finish(
-        {
-          chat: { provider: 'z-ai' },
-          tts: { provider: 'z-ai', voice: 'tongtong' },
-          asr: { provider: 'z-ai' },
-        },
-        { baseUrl, apiKey }
-      );
+    const baseUrl = $('setup-baseurl').value.trim();
+    const apiKey = $('setup-key').value.trim();
+    if (!baseUrl || !apiKey) {
+      errorBox.textContent = 'Both the base URL and the API key are required.';
+      errorBox.hidden = false;
+      return;
     }
 
-    const model = (modelManual.hidden ? modelSelect.value : modelManual.value).trim();
-    if (!model) return showError('Pick a model, or type the name of one you have pulled in Ollama.');
-
-    const asr = asrSelect.value;
-    if (asr === 'z-ai') {
-      const apiKey = keyInput.value.trim();
-      const baseUrl = baseUrlInput.value.trim();
-      if (!apiKey || !baseUrl) {
-        return showError('Voice input via z-ai needs a key — add one on the z-ai tab, or set voice input to off.');
-      }
-      return finish(
-        {
-          chat: { provider: 'ollama', model },
-          tts: { provider: 'system', voice: voiceSelect.value },
-          asr: { provider: 'z-ai' },
-        },
-        { baseUrl, apiKey }
-      );
+    saveButton.disabled = true;
+    saveButton.textContent = 'Saving…';
+    try {
+      await api('/setup', { baseUrl, apiKey });
+      await api('/settings', {
+        chat: { provider: 'z-ai' },
+        tts: { provider: 'z-ai', voice: 'tongtong' },
+        asr: { provider: 'z-ai' },
+      });
+      finished = true;
+      stopPolling();
+      window.buddy.setupComplete();
+    } catch (error) {
+      errorBox.textContent = error.message;
+      errorBox.hidden = false;
+      saveButton.disabled = false;
+      saveButton.textContent = 'Use this cloud API';
     }
-
-    return finish({
-      chat: { provider: 'ollama', model },
-      tts: { provider: 'system', voice: voiceSelect.value },
-      asr: asr === 'whisper' ? { provider: 'whisper', baseUrl: whisperUrl.value.trim() } : { provider: 'off' },
-    });
   });
 
-  loadSystemVoices();
-  probeOllama();
-  selectMode('cloud');
+  beginDownload();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

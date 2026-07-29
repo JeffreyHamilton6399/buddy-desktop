@@ -3,44 +3,52 @@
 A friendly AI companion that lives on your desktop as a small glowing orb. Click it — or say
 **“Hey Buddy”** — and a Siri-style panel opens. Talk or type; Buddy answers out loud.
 
-Buddy can run **two ways**, and you pick on first launch:
+**There is nothing to set up.** No API key, no account, no sign-in, no provider to choose. Install
+it, and on first launch Buddy fetches its own language model once — you watch a progress bar — and
+then works forever, offline, on your own machine.
 
-- **On this machine** — an [Ollama](https://ollama.com) model does the thinking, your OS's own voices
-  do the talking. No key, no account, works with the network unplugged.
-- **z-ai cloud** — bring your own key. Buddy calls the provider directly; there is still no Buddy
-  server, no proxy and no account in between.
+```
+   install  →  "Getting my brain ready… 43%"  →  chat
+```
 
-You can mix them too: a local model with cloud speech, or the reverse. Either way your conversations
-are **saved on your device** as plain JSON you can browse from the app and delete whenever you like.
+Under the hood: [llama.cpp](https://github.com/ggerganov/llama.cpp) runs **Llama 3.2 1B** inside the
+app, and your operating system's own voices speak the replies. Both are free and neither needs a
+network once the model has landed. Your conversations are **saved on your device** as plain JSON you
+can browse from the app and delete whenever you like.
+
+If you'd rather point Buddy at something stronger, a cloud API and a local
+[Ollama](https://ollama.com) server are both supported — see
+[Using something other than the built-in model](#using-something-other-than-the-built-in-model).
+Nobody is asked to.
 
 ```
 buddy-desktop/
 ├── desktop-app/                    Electron app (the whole product)
 ├── docs/                           Static landing page for GitHub Pages
-└── .github/workflows/release.yml   Builds + publishes installers on tag push (see below)
+└── .github/workflows/main.yml      Builds + publishes installers on tag push
 ```
 
 ---
 
 ## What “local” actually means
 
-Buddy has three separate jobs, and each one can run in either place. This table is the whole privacy
-story — there is nothing else to it:
+Buddy has three separate jobs. **Out of the box all three run on your machine**, so nothing you say
+or type leaves it:
 
-| Job | Local option | Cloud option | Leaves your device? |
+| Job | Default (no setup) | Optional alternatives | Leaves your device? |
 | --- | --- | --- | --- |
-| **Thinking** (the model) | Ollama on `127.0.0.1` | z-ai | only in cloud mode |
-| **Talking** (text → speech) | your OS's installed voices | z-ai | only in cloud mode |
-| **Hearing** (speech → text) | a local Whisper server, or **off** | z-ai | only in cloud mode |
-| **Your chat history** | always on your disk | — | **never** |
+| **Thinking** | Llama 3.2 1B, in-process via llama.cpp | Ollama · a cloud API | **no** |
+| **Talking** | your OS's installed voices | a cloud API | **no** |
+| **Hearing** | **off** — the mic is never opened | local Whisper · a cloud API | **no** |
+| **Your chat history** | plain JSON on your disk | — | **never** |
 
-**In cloud mode, Buddy is local-first but not private.** The app, your key and the loopback server
-all live on your machine, and nothing routes through a server belonging to this project — because
-there isn't one. But your messages and voice recordings do go to z-ai to be processed.
+The one exception is a **single download on first launch**: the ~770 MB model file comes from
+HuggingFace. After that Buddy runs with the network unplugged, and you can verify that by unplugging
+it. Nothing is phoned home, there is no telemetry, and there is no account.
 
-**In local mode, nothing leaves your machine at all** — as long as *hearing* is also local or off.
-Buddy tells you which of these is true, in the setup screen and in the app, rather than making you
-work it out.
+**If you switch a job to a cloud API, that job stops being private** — your messages or voice go to
+that provider to be processed. Buddy says which jobs are cloud-backed in the app rather than making
+you work it out, and the startup log prints `✓ fully local` only when none of them are.
 
 ### About the wake word
 
@@ -66,8 +74,8 @@ You can also switch the wake word off from the tray menu at any time, whatever t
 1. Download the installer for your OS from the
    [latest release](https://github.com/JeffreyHamilton6399/buddy-desktop/releases/latest).
 2. Run it (see [First launch](#first-launch-unsigned-builds) — the builds are unsigned).
-3. On first launch, choose **On this machine** (a local Ollama model, no key) or **z-ai cloud**
-   (paste a base URL and key once). Either way it is stored only in Buddy's local data folder.
+3. On first launch Buddy downloads its model (~770 MB, once) and shows a progress bar. Nothing to
+   choose, no key to paste. If the download is interrupted it resumes.
 4. The orb appears in the top-right corner. Drag it wherever you like; it remembers.
 
 ### First launch (unsigned builds)
@@ -86,69 +94,70 @@ certificate; both cost money and neither is set up here.
 
 ---
 
-## Running Buddy fully locally
+## Using something other than the built-in model
 
-Pick **On this machine** on the first-run screen. Buddy checks what you already have and tells you
-what's missing.
-
-### 1. Thinking — Ollama (one install)
-
-```bash
-# macOS / Linux
-curl -fsSL https://ollama.com/install.sh | sh
-# Windows: download the installer from https://ollama.com
-
-ollama pull llama3.2      # ~2 GB, comfortable on 8 GB of RAM
-```
-
-That's it. Buddy finds Ollama on `http://127.0.0.1:11434` by itself and lists whatever models you've
-pulled. If Ollama isn't running, the setup screen says so and tells you the command to fix it.
-
-Smaller machines: `llama3.2:1b` or `qwen2.5:3b`. Bigger machines: `qwen2.5:7b`, `phi4`.
-
-### 2. Talking — already installed
-
-Buddy uses the voices your operating system ships with, spoken directly in the app. **Nothing to
-install and nothing to configure** — the setup screen lists the voices it found and lets you choose.
-Windows has David/Zira, macOS has the full Speech set, Linux depends on your `speech-dispatcher`
-setup.
-
-### 3. Hearing — optional
-
-This is the only piece that needs real work, so it's **off by default** and Buddy is completely
-usable without it (you type instead of talking). To turn it on, run any OpenAI-compatible
-transcription server and point Buddy at it:
-
-```bash
-# Speaches (formerly faster-whisper-server) — the easiest option
-docker run --rm -p 8000:8000 ghcr.io/speaches-ai/speaches:latest
-```
-
-Then set *Voice input* to **Local Whisper server** with `http://127.0.0.1:8000/v1`. Anything exposing
-`POST /audio/transcriptions` works — Speaches, faster-whisper-server, LocalAI, or `whisper.cpp`'s
-server. Buddy sends the clip as a multipart file with a correct extension, because most of these
-sniff the container from the filename before handing it to ffmpeg.
-
-With hearing local, the mic **and** the wake word run entirely on your machine.
-
-### Changing your mind later
+You do not need any of this. Buddy ships working. But if you want a bigger brain or you already run
+a local model server, every job can be pointed elsewhere.
 
 Everything lives in one small file you can edit by hand — `buddy-settings.json` in the data folder
-listed [below](#where-things-are-stored):
+listed [below](#where-things-are-stored). Restart Buddy after editing, or POST the same shape to
+`/settings`.
 
 ```json
 {
-  "chat": { "provider": "ollama", "model": "llama3.2", "baseUrl": "http://127.0.0.1:11434" },
+  "chat": { "provider": "builtin", "model": "", "baseUrl": "http://127.0.0.1:11434" },
   "tts":  { "provider": "system", "voice": "Microsoft Zira Desktop" },
   "asr":  { "provider": "off", "baseUrl": "http://127.0.0.1:8000/v1", "model": "Systran/faster-whisper-small" },
   "saveHistory": true
 }
 ```
 
-`chat.provider` is `ollama` or `z-ai`. `tts.provider` is `system` or `z-ai`. `asr.provider` is
-`whisper`, `z-ai`, or `off`. Restart Buddy after editing, or POST the same shape to `/settings`.
+| Job | Setting | Values |
+| --- | --- | --- |
+| Thinking | `chat.provider` | `builtin` (default) · `ollama` · `z-ai` |
+| Talking | `tts.provider` | `system` (default) · `z-ai` |
+| Hearing | `asr.provider` | `off` (default) · `whisper` · `z-ai` |
 
----
+### A bigger model via Ollama
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh   # Windows: installer from ollama.com
+ollama pull qwen2.5:7b
+```
+
+Then set `chat.provider` to `ollama` and `chat.model` to `qwen2.5:7b`. Buddy finds Ollama on
+`http://127.0.0.1:11434` by itself. This stays entirely local — it is just a larger model than the
+one Buddy carries.
+
+### A cloud API
+
+The first-run screen has a *"Use a cloud API instead"* link if you want to skip the download
+altogether. Or set `chat.provider` to `z-ai` and put a `baseUrl` and `apiKey` in `.z-ai-config`.
+**This is the only configuration that sends your conversations off the machine.**
+
+### Voice input — turning the microphone on
+
+Off by default, because it is the one piece that needs real setup and Buddy is completely usable by
+typing. To enable it, run any OpenAI-compatible transcription server and point Buddy at it:
+
+```bash
+# Speaches (formerly faster-whisper-server) — the easiest option
+docker run --rm -p 8000:8000 ghcr.io/speaches-ai/speaches:latest
+```
+
+Then set `asr.provider` to `whisper` with `baseUrl` `http://127.0.0.1:8000/v1`. Anything exposing
+`POST /audio/transcriptions` works — Speaches, faster-whisper-server, LocalAI, or `whisper.cpp`'s
+server. Buddy sends the clip as a multipart file with a correct extension, because most of these
+sniff the container from the filename before handing it to ffmpeg.
+
+With hearing local, the mic **and** the wake word run entirely on your machine.
+
+### Where the model lives, and how to reclaim the space
+
+`models/Llama-3.2-1B-Instruct-Q4_K_M.gguf` (~770 MB) inside the data folder. Delete it and Buddy
+offers to download it again on next launch; point `chat.provider` at something else first if you
+don't want it back. The download resumes if interrupted and is checked against a known SHA-256
+before use, so a half-finished file can never be loaded as a model.
 
 ## Your chat history
 
@@ -258,6 +267,7 @@ a packaged build:
 | Linux | `~/.config/buddy/` |
 
 - `buddy-settings.json` — which provider serves each capability, and whether history is saved.
+- `models/*.gguf` — the built-in language model (~770 MB). Delete it to reclaim the space.
 - `chats/<id>.json` — one file per conversation. Yours to read, back up or delete.
 - `.z-ai-config` — your `baseUrl` and `apiKey`, written with `0600` where the filesystem supports it.
   **Stored unencrypted.** It's gitignored, and never logged or returned by any endpoint. Only exists
@@ -280,9 +290,10 @@ a packaged build:
 │    /chat /tts /asr /chats                                  │
 └──────┬──────────────────────┬──────────────────────────────┘
        │                      │
-       │ chats/*.json         ├── ollama    → 127.0.0.1:11434
-       ▼ (never uploaded)     ├── whisper   → 127.0.0.1:8000
-   your disk                  ├── system voice → the renderer, via the OS
+       │ chats/*.json         ├── builtin   → llama.cpp, in this process  ← default
+       ▼ (never uploaded)     ├── system voice → the renderer, via the OS  ← default
+   your disk                  ├── ollama    → 127.0.0.1:11434
+                              ├── whisper   → 127.0.0.1:8000
                               └── z-ai      → the provider's API
                                              (z-ai-web-dev-sdk, main process only)
 ```
@@ -405,6 +416,20 @@ contained change:
 3. Add any native binary to `build.asarUnpack` in `package.json`.
 
 ---
+
+## The built-in model
+
+`node-llama-cpp` embeds llama.cpp with prebuilt native binaries, so there is no compile step and no
+separate daemon — the model is loaded straight into the Electron main process. A few notes:
+
+- **It needs a modern Electron.** Electron 28 cannot even parse `node-llama-cpp` (its ESM import
+  attributes are newer than that V8), which is why Buddy is on Electron 43.
+- **GPU acceleration comes free where it is bundled.** Apple Silicon gets Metal, since it ships inside
+  the `mac-arm64-metal` binary. The CUDA and Vulkan variants are **excluded from the installer** —
+  together they are over 500 MB — so Windows and Linux run on CPU. A 1B model is comfortable there.
+- **Loading costs ~8 seconds and about a gigabyte of RAM.** It happens lazily on the first message,
+  stays warm, and is released after 30 minutes idle.
+- **Requests are serialised.** One llama.cpp context cannot serve two conversations at once.
 
 ## Verification status
 

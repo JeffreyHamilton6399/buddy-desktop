@@ -6,7 +6,7 @@
     <title>Buddy — your local AI companion</title>
     <meta
       name="description"
-      content="Buddy is a friendly AI companion that lives on your desktop as a small glowing orb. Runs on your machine with your own key — no middleman server."
+      content="Buddy is a friendly AI companion that lives on your desktop as a small glowing orb. No API key and no account — it brings its own model and runs entirely on your computer."
     />
     <meta name="theme-color" content="#0b0b0f" />
     <link rel="icon" href="orb.svg" type="image/svg+xml" />
@@ -39,13 +39,13 @@
       <header class="hero" id="top">
         <div class="wrap hero-inner">
           <div class="hero-copy reveal">
-            <p class="eyebrow">Local-first desktop companion</p>
+            <p class="eyebrow">Runs entirely on your computer</p>
             <h1>Meet Buddy.<br /><span class="grad">Your local AI companion.</span></h1>
             <p class="lede">Say “Hey Buddy”. It just works.</p>
             <p class="sub">
               A small glowing orb that sits on top of everything. Click it or call its name, then talk or type —
-              Buddy answers out loud. Run it on a local model with your OS's own voices and nothing leaves your
-              machine, or bring a cloud key. Either way there's no middleman server.
+              Buddy answers out loud. No API key, no account, no sign-in: Buddy brings its own model and speaks
+              with your computer's own voice. It works with the network unplugged.
             </p>
             <div class="cta-row">
               <a class="btn btn-primary" id="hero-download" href="#download">Download Buddy</a>
@@ -108,10 +108,10 @@
             </li>
             <li class="card reveal">
               <span class="card-icon" aria-hidden="true">◈</span>
-              <h3>Truly local, if you want</h3>
+              <h3>Nothing to set up</h3>
               <p>
-                Point Buddy at a local Ollama model and your system voices and it works with the network
-                unplugged. No key, no account, no hosted backend. Or bring a cloud key instead.
+                No API key, no account, no provider to pick. Buddy downloads its own language model once, then
+                thinks on your machine with llama.cpp and talks with your OS's own voices.
               </p>
             </li>
             <li class="card reveal">
@@ -138,10 +138,10 @@
             </li>
             <li class="step reveal">
               <span class="step-num">2</span>
-              <h3>Choose</h3>
+              <h3>Wait once</h3>
               <p>
-                A local model on this machine, or a cloud key. Buddy checks what you already have and keeps
-                your answer on this device.
+                Buddy fetches its language model — about 770 MB, with a progress bar. This happens a single
+                time and then never again.
               </p>
             </li>
             <li class="step reveal">
@@ -159,8 +159,8 @@
           <h2 class="reveal">What “local” means here</h2>
           <div class="honest reveal">
             <p>
-              Buddy has three separate jobs, and you choose where each one runs. That choice is the whole
-              privacy story — there is nothing else to it.
+              Buddy has three separate jobs, and <strong>out of the box all three happen on your computer.</strong>
+              You can move any of them to a cloud API, but nothing asks you to.
             </p>
 
             <div class="table-scroll">
@@ -168,25 +168,25 @@
                 <thead>
                   <tr>
                     <th>Job</th>
-                    <th>On your machine</th>
-                    <th>In the cloud</th>
+                    <th>Default — no setup</th>
+                    <th>If you go looking</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
                     <td><strong>Thinking</strong></td>
-                    <td>an Ollama model</td>
-                    <td>z-ai</td>
+                    <td class="never">Llama 3.2 1B, inside the app</td>
+                    <td>Ollama · a cloud API</td>
                   </tr>
                   <tr>
                     <td><strong>Talking</strong></td>
-                    <td>your OS's voices</td>
-                    <td>z-ai</td>
+                    <td class="never">your OS's own voices</td>
+                    <td>a cloud API</td>
                   </tr>
                   <tr>
                     <td><strong>Hearing</strong></td>
-                    <td>a local Whisper server, or off</td>
-                    <td>z-ai</td>
+                    <td class="never">off — the mic is never opened</td>
+                    <td>local Whisper · a cloud API</td>
                   </tr>
                   <tr>
                     <td><strong>Your chats</strong></td>
@@ -198,14 +198,15 @@
             </div>
 
             <p>
-              <strong>Go fully local and nothing leaves your machine</strong> — not your messages, not your
-              voice, not your history. It genuinely works with the network unplugged.
+              <strong>The one exception is a single download on first launch:</strong> the model file, about
+              770 MB, comes from HuggingFace. After that, unplug your network and Buddy carries on working —
+              please do check. There is no telemetry and no account.
             </p>
             <p>
-              <strong>Choose the cloud and Buddy is local-first but not private</strong>, and we won't pretend
-              otherwise: your messages and voice recordings go to z-ai to be processed. What stays true either
-              way is that there is no Buddy server, no proxy and no account — nothing of yours passes through
-              us, because there is no “us” in the path.
+              <strong>If you do switch a job to a cloud API, that job stops being private</strong>, and we won't
+              pretend otherwise: those messages go to the provider to be processed. What stays true either way
+              is that there is no Buddy server, no proxy and no account — nothing of yours passes through us,
+              because there is no “us” in the path.
             </p>
             <p class="honest-flag">
               <strong>About the wake word:</strong> Buddy spots speech locally, then transcribes a short clip to
@@ -216,6 +217,7 @@
             </p>
           </div>
           <ul class="badges reveal">
+            <li>No API key</li>
             <li>Runs with the network unplugged</li>
             <li>No hosted backend</li>
             <li>No account</li>
@@ -232,7 +234,7 @@
           <div class="orb orb-lg pulse reveal" aria-hidden="true"></div>
           <h2 class="reveal">Download Buddy</h2>
           <p class="section-lede reveal" id="download-line">
-            macOS <code>.dmg</code> · Windows <code>.exe</code> · Linux <code>.AppImage</code>
+macOS <code>.dmg</code> · Windows <code>.exe</code> · Linux <code>.AppImage</code> — about 140 MB
           </p>
           <a class="btn btn-primary btn-lg reveal" id="download-btn" href="#">Download Buddy</a>
           <p class="cta-note reveal" id="download-hint">Takes you to the latest release on GitHub.</p>
@@ -244,6 +246,10 @@
               how to get past it:
             </p>
             <ul>
+              <li>
+                <strong>Every OS:</strong> the first launch downloads Buddy's language model (~770 MB) and shows
+                a progress bar. It resumes if interrupted. Nothing to configure.
+              </li>
               <li>
                 <strong>macOS:</strong> right-click the app and choose <em>Open</em> (don't double-click). If it
                 says the app is damaged, run
@@ -260,7 +266,7 @@
               <li>The draggable always-on-top orb, with its position remembered between launches</li>
               <li>A Siri-style chat panel with spoken replies and a mic button</li>
               <li>Saved conversations you can browse, reopen and delete — kept on your disk only</li>
-              <li>A first-run choice between a local model and a cloud key, with your local stack auto-detected</li>
+              <li>Its own language model, fetched once on first launch and run in-process with llama.cpp</li>
               <li>“Hey Buddy” wake word, with a tray toggle to switch it off</li>
               <li>A tray/menu-bar icon: open Buddy, toggle the wake word, quit</li>
               <li>A loopback-only local server that holds your key and talks to whichever model you chose</li>

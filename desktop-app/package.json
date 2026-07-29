@@ -1,6 +1,6 @@
 {
   "name": "buddy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Buddy — a local-first AI companion that lives on your desktop",
   "main": "src/main.js",
   "author": "Jeffrey Hamilton",
@@ -18,11 +18,12 @@
     "dist:linux": "electron-builder --linux AppImage deb"
   },
   "dependencies": {
+    "node-llama-cpp": "^3.19.1",
     "z-ai-web-dev-sdk": "^0.0.18"
   },
   "devDependencies": {
-    "electron": "^28.3.3",
-    "electron-builder": "^24.13.3"
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.buddy.app",
@@ -30,10 +31,14 @@
     "files": [
       "src/**/*",
       "buddy-icon.png",
-      "package.json"
+      "package.json",
+      "!node_modules/@node-llama-cpp/*-cuda*/**",
+      "!node_modules/@node-llama-cpp/*-vulkan/**"
     ],
     "asarUnpack": [
-      "node_modules/z-ai-web-dev-sdk/**/*"
+      "node_modules/z-ai-web-dev-sdk/**/*",
+      "node_modules/node-llama-cpp/**/*",
+      "node_modules/@node-llama-cpp/**/*"
     ],
     "mac": {
       "target": [

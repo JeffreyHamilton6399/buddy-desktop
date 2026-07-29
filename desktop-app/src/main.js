@@ -33,7 +33,7 @@ const ORB_SIZE = 80;
 const PANEL_WIDTH = 420;
 const PANEL_HEIGHT = 620;
 const SETUP_WIDTH = 470;
-const SETUP_HEIGHT = 640;
+const SETUP_HEIGHT = 520;
 const DRAG_INTERVAL_MS = 8;
 
 // Handed to the renderer so only Buddy can talk to Buddy's server.
@@ -183,8 +183,16 @@ function attachDiagnostics(window, label) {
     console.error(`[buddy] ${label} render process gone:`, details.reason);
   });
   if (!app.isPackaged) {
-    webContents.on('console-message', (_event, level, message, line, source) => {
-      if (level >= 2) console.error(`[${label}] ${message} (${source}:${line})`);
+    // Electron 35 replaced the positional arguments with a single details
+    // object, so accept whichever shape this runtime hands us.
+    webContents.on('console-message', (...args) => {
+      const details = args[0] && typeof args[0] === 'object' && 'message' in args[0] ? args[0] : null;
+      const level = details ? details.level : args[1];
+      const message = details ? details.message : args[2];
+      const line = details ? details.lineNumber : args[3];
+      const source = details ? details.sourceId : args[4];
+      const isProblem = typeof level === 'string' ? level === 'error' || level === 'warning' : level >= 2;
+      if (isProblem) console.error(`[${label}] ${message} (${source}:${line})`);
     });
   }
 }

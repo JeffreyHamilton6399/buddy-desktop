@@ -10,6 +10,8 @@
  *   GET    /settings            current provider choices (never any secret)
  *   POST   /settings            change provider choices
  *   GET    /providers/status    probe the local stack: is Ollama up, which models
+ *   GET    /model               how far the built-in model download has got
+ *   POST   /model               start or resume that download
  *   POST   /setup               store the z-ai baseUrl + key
  *   POST   /chat                send a message, get a reply
  *   POST   /tts                 speak text (audio bytes, or a hand-off to the OS voice)
@@ -29,6 +31,8 @@ const path = require('path');
 const crypto = require('crypto');
 
 const providers = require('./providers.js');
+const builtin = require('./builtin.js');
+const modelStore = require('./model.js');
 const { History } = require('./history.js');
 
 // ── SDK facts, verified against z-ai-web-dev-sdk@0.0.18 ────────────────────
@@ -131,8 +135,10 @@ async function writeSettings(patch) {
  * Any capability still pointing at z-ai needs the key to be present.
  */
 function isConfigured() {
-  if (!settingsFileExists()) return Boolean(readConfig()); // pre-settings installs
   const settings = readSettings();
+  // The built-in model is the default, so a brand new install is "configured"
+  // exactly when its model has finished downloading.
+  if (providers.usesBuiltinModel(settings) && !modelStore.isReady(configDir())) return false;
   if (providers.cloudCapabilities(settings).length === 0) return true;
   return Boolean(readConfig());
 }
@@ -333,7 +339,12 @@ function describeRuntime() {
       tts: settings.tts.provider,
       asr: settings.asr.provider,
     },
-    chatModel: settings.chat.model || providers.OLLAMA_DEFAULT_MODEL,
+    chatModel:
+      settings.chat.provider === 'builtin'
+        ? modelStore.MODEL.label
+        : settings.chat.model || providers.OLLAMA_DEFAULT_MODEL,
+    model: modelStore.snapshot(configDir()),
+    needsModel: providers.usesBuiltinModel(settings) && !modelStore.isReady(configDir()),
     ttsVoice: settings.tts.voice,
     cloud: providers.cloudCapabilities(settings),
     fullyLocal: providers.isFullyLocal(settings),
@@ -374,6 +385,25 @@ async function handlePostSettings(req, res) {
   return sendJson(res, 200, { ok: true, settings, runtime: describeRuntime() });
 }
 
+/** Where the built-in model download has got to. Polled by the ready screen. */
+async function handleModelState(_req, res) {
+  return sendJson(res, 200, modelStore.snapshot(configDir()));
+}
+
+/**
+ * Start (or resume) the download. Returns immediately with the current state —
+ * the caller polls GET /model rather than holding a request open for 770 MB.
+ */
+async function handleModelDownload(_req, res) {
+  if (modelStore.isReady(configDir())) return sendJson(res, 200, modelStore.snapshot(configDir()));
+  if (!modelStore.isDownloading()) {
+    modelStore.ensureModel(configDir()).catch(() => {
+      /* the error is already on the snapshot the client polls */
+    });
+  }
+  return sendJson(res, 202, modelStore.snapshot(configDir()));
+}
+
 async function handleProviderStatus(_req, res) {
   const status = await providers.probeProviders(readSettings());
   return sendJson(res, 200, status);
@@ -401,7 +431,19 @@ async function handleChat(req, res) {
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...context];
 
   let completion;
-  if (settings.chat.provider === 'ollama') {
+  if (settings.chat.provider === 'builtin') {
+    if (!modelStore.isReady(configDir())) {
+      return sendJson(res, 503, {
+        error: "Buddy's model is still downloading.",
+        needsModel: true,
+        model: modelStore.snapshot(configDir()),
+      });
+    }
+    completion = await builtin.chat({
+      modelPath: modelStore.modelPath(configDir()),
+      messages,
+    });
+  } else if (settings.chat.provider === 'ollama') {
     completion = await providers.ollamaChat({
       baseUrl: settings.chat.baseUrl,
       model: settings.chat.model,
@@ -553,6 +595,8 @@ const ROUTES = [
   ['GET', /^\/settings$/, handleGetSettings],
   ['POST', /^\/settings$/, handlePostSettings],
   ['GET', /^\/providers\/status$/, handleProviderStatus],
+  ['GET', /^\/model$/, handleModelState],
+  ['POST', /^\/model$/, handleModelDownload],
   ['POST', /^\/setup$/, handleSetup],
   ['POST', /^\/chat$/, handleChat],
   ['POST', /^\/tts$/, handleTts],
@@ -661,10 +705,14 @@ function start(options = {}) {
       console.log('  ✦ Buddy local server');
       console.log(`    http://127.0.0.1:${port}`);
       console.log(`    config   ${configDir()}${isConfigured() ? '' : '  (not set up yet)'}`);
+      const modelState = modelStore.snapshot(configDir());
       console.log(
         `    chat     ${settings.chat.provider} (${where(settings.chat.provider)})` +
           (settings.chat.provider === 'ollama'
             ? ` · ${settings.chat.model || providers.OLLAMA_DEFAULT_MODEL} · ${settings.chat.baseUrl}`
+            : '') +
+          (settings.chat.provider === 'builtin'
+            ? ` · ${modelStore.MODEL.label} · ${modelState.ready ? 'model ready' : 'model NOT downloaded yet'}`
             : '')
       );
       console.log(`    voice    ${settings.tts.provider} (${where(settings.tts.provider)})`);
