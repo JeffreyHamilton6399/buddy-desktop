@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "description": "Buddy — a local-first AI companion that lives on your desktop",
   "main": "src/main.js",
-  "author": "Buddy",
+  "author": "Jeffrey Hamilton",
   "license": "MIT",
   "private": true,
+  "homepage": "https://github.com/JeffreyHamilton6399/buddy-desktop",
   "scripts": {
     "start": "electron .",
     "server": "node src/server/server.js",
@@ -66,7 +67,9 @@
         "deb"
       ],
       "category": "Utility",
-      "icon": "buddy-icon.png"
+      "icon": "buddy-icon.png",
+      "maintainer": "Jeffrey Hamilton <JeffreyHamilton6399@users.noreply.github.com>",
+      "description": "A local-first AI companion that lives on your desktop as a glowing orb"
     },
     "publish": {
       "provider": "github",
