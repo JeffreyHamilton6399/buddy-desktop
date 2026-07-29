@@ -263,12 +263,53 @@ The repo is live at **<https://github.com/JeffreyHamilton6399/buddy-desktop>** (
 right content types, zero console errors, and the JS-wired links resolve to
 `https://github.com/JeffreyHamilton6399/buddy-desktop/releases/latest` on the real page.
 
-Two things are deliberately still outstanding:
+**The release workflow lives at `.github/workflows/main.yml`** and was added through the GitHub web
+UI, because the token available for pushing had `repo` scope but not `workflow` — GitHub rejects any
+write under `.github/workflows/` from such a token.
 
-- **`.github/workflows/release.yml` is not in the repo.** The token used to push has `repo` scope but
-  not `workflow`, and GitHub rejects any write under `.github/workflows/` from such a token. The file
-  is correct and present locally, gitignored with a comment pointing at the fix; the README documents
-  both ways to land it. The workflow has therefore **never run**.
-- **There is no release and no `v1.0.0` tag**, so the site's download button currently 404s. The
-  locally built `Buddy Setup 1.0.0.exe` is the deliverable installer until a release is cut — which
-  needs either the workflow above, or a one-command manual upload.
+**`v1.0.0` is published with installers for all three platforms**, built by that workflow on three
+runners in parallel:
+<https://github.com/JeffreyHamilton6399/buddy-desktop/releases/tag/v1.0.0>
+
+| Asset | Size |
+| --- | --- |
+| `Buddy-Setup-1.0.0.exe` | 73 MB |
+| `Buddy-1.0.0-arm64.dmg` | 90.7 MB |
+| `Buddy-1.0.0.dmg` | 95.5 MB |
+| `Buddy-1.0.0.AppImage` | 99.8 MB |
+| `buddy_1.0.0_amd64.deb` | 69.6 MB |
+
+Verified end to end, unauthenticated: `/releases/latest` returns a 302 to the `v1.0.0` tag (so the
+landing page's download button resolves), every asset returns 200, and range requests return correct
+file magic — `4d5a` (MZ) for the exe, `78da` (zlib) for the dmg, `213c` (`!<arch>`) for the deb.
+
+### Two bugs the first release run caught
+
+The first `v1.0.0` attempt failed on two of three runners. Both were real defects that only a genuine
+multi-platform build could surface, and both are fixed — the second run went 3/3.
+
+1. **macOS: the icon was too small.** The spec specified 256×256; electron-builder refuses to generate
+   a macOS `.icns` from anything under 512×512 and failed with *"must be at least 512x512"*. Windows
+   and Linux accept 256, so this broke exactly one of three platforms. `make-icon.js` now emits
+   1024×1024, and the `.icns` conversion that previously failed was confirmed working locally.
+2. **Linux: missing `.deb` metadata.** The AppImage built fine, then `dpkg` rejected the deb —
+   electron-builder will not guess `homepage` or `maintainer`. Both are now set explicitly, with the
+   maintainer using a GitHub `users.noreply` address since that field is embedded in the package and
+   publicly readable.
+
+A false lead worth recording: `app-builder` appeared to reject the hand-written PNG while accepting a
+Chromium-encoded one. Testing both files from both a relative and an absolute path showed the flip was
+**path form, not file content** — Chromium's PNG was rejected too when passed relatively. The icon was
+always valid, and an IDAT-chunking change made on that wrong assumption was reverted.
+
+### Still outstanding
+
+- **The installers have never been executed.** The packaged app was launched from
+  `dist/win-unpacked/`, but `Buddy-Setup-1.0.0.exe` was never run, so the NSIS install flow —
+  shortcuts, Start Menu entry, uninstall — is **unverified**. Nothing on macOS or Linux has been run
+  at all.
+- **`.deb` installs get a generic menu icon.** electron-builder reports `size: 0` for a single-file
+  Linux icon and installs it to `hicolor/0x0/apps/`, which desktop environments ignore. This is stock
+  electron-builder 24 behaviour; fixing it means restructuring into a `build/icons/` set. AppImage is
+  unaffected.
+- **Auto-update is not wired up**, despite the `latest*.yml` files electron-builder publishes.
