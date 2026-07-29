@@ -398,6 +398,208 @@ body.flat .panel {
   }
 }
 
+/* body: messages with the history drawer sliding over them */
+
+.panel-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ── history drawer ──────────────────────────────────────────────────────── */
+
+.drawer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(18, 14, 20, 0.98), rgba(14, 11, 16, 0.99));
+  animation: slide-in 200ms ease both;
+}
+
+.drawer[hidden] {
+  display: none;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 10px 10px 14px;
+  border-bottom: 1px solid rgba(255, 214, 170, 0.09);
+}
+
+.drawer-head strong {
+  font-size: 13px;
+}
+
+.drawer-note {
+  flex: 1;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.drawer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(244, 63, 94, 0.45) transparent;
+}
+
+.drawer-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.drawer-list::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(244, 63, 94, 0.55), rgba(217, 70, 239, 0.5));
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.chat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  margin-bottom: 5px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.035);
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.chat-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(244, 63, 94, 0.35);
+}
+
+.chat-row.is-current {
+  border-color: rgba(251, 191, 36, 0.5);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.chat-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-row-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-row-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-row-del {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: #8a7880;
+  opacity: 0;
+  transition: opacity 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.chat-row:hover .chat-row-del,
+.chat-row-del:focus-visible {
+  opacity: 1;
+}
+
+.chat-row-del:hover {
+  background: rgba(244, 63, 94, 0.2);
+  color: #ffc9d2;
+}
+
+.chat-row-del svg {
+  width: 14px;
+  height: 14px;
+}
+
+.drawer-empty {
+  padding: 26px 16px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.drawer-foot {
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(255, 214, 170, 0.09);
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.switch input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--rose);
+  cursor: pointer;
+}
+
+.danger {
+  width: 100%;
+  padding: 8px;
+  border-radius: 9px;
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  background: rgba(244, 63, 94, 0.1);
+  color: #ffc9d2;
+  font-size: 11.5px;
+  transition: background 150ms ease;
+}
+
+.danger:hover {
+  background: rgba(244, 63, 94, 0.22);
+}
+
+.danger.confirming {
+  border-color: rgba(244, 63, 94, 0.8);
+  background: rgba(244, 63, 94, 0.3);
+  color: #fff;
+  font-weight: 600;
+}
+
 /* messages */
 
 .messages {
@@ -773,6 +975,140 @@ body.flat .panel {
   outline: none;
   border-color: rgba(244, 63, 94, 0.6);
   box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+}
+
+/* mode picker */
+
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 18px;
+  -webkit-app-region: no-drag;
+}
+
+.mode-tab {
+  padding: 10px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: rgba(255, 255, 255, 0.03);
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.mode-tab:hover {
+  transform: translateY(-1px);
+  border-color: rgba(244, 63, 94, 0.45);
+}
+
+.mode-tab strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.mode-tab small {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.mode-tab.is-on {
+  border-color: rgba(251, 191, 36, 0.6);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.14), rgba(217, 70, 239, 0.12));
+}
+
+.mode-pane[hidden] {
+  display: none;
+}
+
+.panel.setup select {
+  width: 100%;
+  height: 36px;
+  margin-bottom: 4px;
+  padding: 0 9px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.34);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.panel.setup select:focus {
+  outline: none;
+  border-color: rgba(244, 63, 94, 0.6);
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+}
+
+.panel.setup input[hidden],
+.panel.setup select[hidden] {
+  display: none;
+}
+
+.opt {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+/* local-stack reachability */
+
+.probe {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.probe-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.probe.up {
+  border-color: rgba(52, 211, 153, 0.45);
+  background: rgba(52, 211, 153, 0.09);
+}
+
+.probe.up .probe-dot {
+  background: var(--emerald);
+  animation: none;
+}
+
+.probe.down {
+  border-color: rgba(244, 63, 94, 0.45);
+  background: rgba(244, 63, 94, 0.09);
+  color: #ffc9d2;
+}
+
+.probe.down .probe-dot {
+  background: var(--rose);
+  animation: none;
+}
+
+.probe code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.4);
+  font-family: "Cascadia Code", "SF Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: #ffd9a8;
 }
 
 .setup-hint {

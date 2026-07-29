@@ -11,6 +11,7 @@
   --amber: #fbbf24;
   --rose: #f43f5e;
   --fuchsia: #d946ef;
+  --emerald: #34d399;
   --grad: linear-gradient(120deg, var(--amber), var(--rose) 52%, var(--fuchsia));
   --wrap: 1080px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -589,6 +590,55 @@ code {
   color: var(--text);
 }
 
+/* Wide content scrolls inside its own box, never the page. */
+.table-scroll {
+  margin: 0 0 16px;
+  overflow-x: auto;
+  border-radius: 11px;
+  border: 1px solid var(--edge);
+}
+
+.privacy-table {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.privacy-table th,
+.privacy-table td {
+  padding: 9px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 214, 170, 0.08);
+}
+
+.privacy-table thead th {
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #cbb6bd;
+}
+
+.privacy-table tbody tr:last-child th,
+.privacy-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.privacy-table td {
+  color: var(--muted);
+}
+
+.privacy-table td strong {
+  color: var(--text);
+}
+
+.privacy-table .never {
+  color: var(--emerald, #34d399);
+  font-weight: 600;
+}
+
 .honest-flag {
   padding: 14px 16px;
   border-radius: 11px;
@@ -744,7 +794,7 @@ code {
     grid-template-columns: 1.05fr 0.95fr;
   }
   .grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 

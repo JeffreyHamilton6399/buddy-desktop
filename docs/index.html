@@ -44,8 +44,8 @@
             <p class="lede">Say “Hey Buddy”. It just works.</p>
             <p class="sub">
               A small glowing orb that sits on top of everything. Click it or call its name, then talk or type —
-              Buddy answers out loud. It runs on your machine and talks straight to the AI with your key.
-              No middleman server.
+              Buddy answers out loud. Run it on a local model with your OS's own voices and nothing leaves your
+              machine, or bring a cloud key. Either way there's no middleman server.
             </p>
             <div class="cta-row">
               <a class="btn btn-primary" id="hero-download" href="#download">Download Buddy</a>
@@ -79,7 +79,7 @@
       <section class="section" id="features">
         <div class="wrap">
           <h2 class="reveal">Small orb, real presence</h2>
-          <p class="section-lede reveal">Four things Buddy is built to do well.</p>
+          <p class="section-lede reveal">The things Buddy is built to do well.</p>
 
           <ul class="grid">
             <li class="card reveal">
@@ -108,10 +108,18 @@
             </li>
             <li class="card reveal">
               <span class="card-icon" aria-hidden="true">◈</span>
-              <h3>Your key, your device</h3>
+              <h3>Truly local, if you want</h3>
               <p>
-                No account, no hosted backend, no proxy. Your API key is stored in Buddy's own data folder and
-                used only to call the AI provider directly.
+                Point Buddy at a local Ollama model and your system voices and it works with the network
+                unplugged. No key, no account, no hosted backend. Or bring a cloud key instead.
+              </p>
+            </li>
+            <li class="card reveal">
+              <span class="card-icon" aria-hidden="true">◉</span>
+              <h3>Remembers your chats</h3>
+              <p>
+                Every conversation is saved to your own disk as readable JSON. Browse them from the panel,
+                reopen any of them, and delete what you don't want — none of it is ever uploaded.
               </p>
             </li>
           </ul>
@@ -130,8 +138,11 @@
             </li>
             <li class="step reveal">
               <span class="step-num">2</span>
-              <h3>Run</h3>
-              <p>Paste your z-ai base URL and API key once. Buddy keeps them on this device.</p>
+              <h3>Choose</h3>
+              <p>
+                A local model on this machine, or a cloud key. Buddy checks what you already have and keeps
+                your answer on this device.
+              </p>
             </li>
             <li class="step reveal">
               <span class="step-num">3</span>
@@ -148,28 +159,69 @@
           <h2 class="reveal">What “local” means here</h2>
           <div class="honest reveal">
             <p>
-              Buddy is <strong>local-first</strong>: it runs entirely on your machine, stores your key in its own
-              local data folder, and calls the AI provider directly. There is no Buddy server, no proxy and no
-              account — nothing of yours passes through us, because there is no “us” in the path.
+              Buddy has three separate jobs, and you choose where each one runs. That choice is the whole
+              privacy story — there is nothing else to it.
+            </p>
+
+            <div class="table-scroll">
+              <table class="privacy-table">
+                <thead>
+                  <tr>
+                    <th>Job</th>
+                    <th>On your machine</th>
+                    <th>In the cloud</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Thinking</strong></td>
+                    <td>an Ollama model</td>
+                    <td>z-ai</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Talking</strong></td>
+                    <td>your OS's voices</td>
+                    <td>z-ai</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Hearing</strong></td>
+                    <td>a local Whisper server, or off</td>
+                    <td>z-ai</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Your chats</strong></td>
+                    <td>always your disk</td>
+                    <td class="never">never uploaded</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p>
+              <strong>Go fully local and nothing leaves your machine</strong> — not your messages, not your
+              voice, not your history. It genuinely works with the network unplugged.
             </p>
             <p>
-              It is <strong>not fully private</strong>, and we won't pretend otherwise. The language model,
-              text-to-speech and speech recognition all run on the z-ai provider's servers, so your messages and
-              voice recordings are sent there to be processed.
+              <strong>Choose the cloud and Buddy is local-first but not private</strong>, and we won't pretend
+              otherwise: your messages and voice recordings go to z-ai to be processed. What stays true either
+              way is that there is no Buddy server, no proxy and no account — nothing of yours passes through
+              us, because there is no “us” in the path.
             </p>
             <p class="honest-flag">
-              <strong>About the wake word:</strong> this build detects speech locally, then sends short audio
-              clips to the AI provider to check whether you said “Hey Buddy”. So while the wake word is on,
-              brief clips of ambient sound leave your device whenever something is loud enough to look like
-              speech. Turn it off from the tray and nothing is captured until you press the mic yourself.
+              <strong>About the wake word:</strong> Buddy spots speech locally, then transcribes a short clip to
+              check whether you said “Hey Buddy”. Where that clip goes is exactly your <em>hearing</em> setting.
+              Local Whisper means ambient audio never leaves your device. z-ai means short clips of ambient
+              sound are sent there whenever something sounds like speech. Set hearing to <strong>off</strong>
+              and Buddy never opens your microphone at all — you just type instead.
             </p>
           </div>
           <ul class="badges reveal">
+            <li>Runs with the network unplugged</li>
             <li>No hosted backend</li>
             <li>No account</li>
-            <li>Key stays on your device</li>
-            <li>MIT licensed</li>
+            <li>Chats never leave your disk</li>
             <li>Wake word can be turned off</li>
+            <li>MIT licensed</li>
           </ul>
         </div>
       </section>
@@ -207,9 +259,11 @@
             <ul>
               <li>The draggable always-on-top orb, with its position remembered between launches</li>
               <li>A Siri-style chat panel with spoken replies and a mic button</li>
+              <li>Saved conversations you can browse, reopen and delete — kept on your disk only</li>
+              <li>A first-run choice between a local model and a cloud key, with your local stack auto-detected</li>
               <li>“Hey Buddy” wake word, with a tray toggle to switch it off</li>
               <li>A tray/menu-bar icon: open Buddy, toggle the wake word, quit</li>
-              <li>A loopback-only local server that holds your key and speaks to the provider</li>
+              <li>A loopback-only local server that holds your key and talks to whichever model you chose</li>
             </ul>
           </div>
         </div>

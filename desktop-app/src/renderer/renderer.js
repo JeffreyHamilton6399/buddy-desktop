@@ -10,6 +10,30 @@ const MODE = ['orb', 'panel', 'setup'].includes(params.get('mode')) ? params.get
 /** @type {{ port: number|null, token: string|null, wakeEnabled: boolean, panelVisible: boolean }} */
 let boot = { port: null, token: null, wakeEnabled: true, panelVisible: false };
 
+/**
+ * Where each capability runs, straight from the server. Shapes what the UI
+ * offers: no local transcription means no mic and no wake word, and a system
+ * voice is spoken here in the renderer rather than streamed as audio.
+ */
+let runtime = {
+  providers: { chat: 'z-ai', tts: 'z-ai', asr: 'z-ai' },
+  cloud: ['chat', 'tts', 'asr'],
+  fullyLocal: false,
+  saveHistory: true,
+};
+
+async function refreshRuntime() {
+  try {
+    const response = await fetch(serverUrl('/health'));
+    if (response.ok) runtime = { ...runtime, ...(await response.json()) };
+  } catch {
+    /* keep the defaults; the panel will surface the failure on first use */
+  }
+  return runtime;
+}
+
+const voiceInputAvailable = () => runtime.providers.asr !== 'off';
+
 const $ = (id) => document.getElementById(id);
 
 // ── server access ─────────────────────────────────────────────────────────
@@ -18,9 +42,9 @@ function serverUrl(route) {
   return `http://127.0.0.1:${boot.port}${route}`;
 }
 
-async function api(route, body, { raw = false } = {}) {
+async function api(route, body, { raw = false, method } = {}) {
   const response = await fetch(serverUrl(route), {
-    method: body === undefined ? 'GET' : 'POST',
+    method: method || (body === undefined ? 'GET' : 'POST'),
     headers: {
       'Content-Type': 'application/json',
       'X-Buddy-Token': boot.token || '',
@@ -182,7 +206,7 @@ function initPanel() {
   function setBusy(value) {
     busy = value;
     sendButton.disabled = value;
-    micButton.disabled = value;
+    micButton.disabled = value || !voiceInputAvailable();
   }
 
   function updateSpeakerButton() {
@@ -196,7 +220,29 @@ function initPanel() {
       if (audioElement.src.startsWith('blob:')) URL.revokeObjectURL(audioElement.src);
       audioElement = null;
     }
+    if (window.speechSynthesis) speechSynthesis.cancel();
     equalizer.hidden = true;
+  }
+
+  function finishSpeaking() {
+    equalizer.hidden = true;
+    if (!busy) setStatus('online');
+  }
+
+  /** The OS voices live here in the renderer, so nothing goes over the network. */
+  function speakWithSystemVoice(text, voiceName) {
+    if (!window.speechSynthesis) throw new Error('This system has no speech voices available');
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = speechSynthesis.getVoices();
+    const chosen = voices.find((voice) => voice.name === voiceName);
+    if (chosen) utterance.voice = chosen;
+    utterance.rate = 1.02;
+
+    equalizer.hidden = false;
+    setStatus('speaking', 'busy');
+    utterance.addEventListener('end', finishSpeaking, { once: true });
+    utterance.addEventListener('error', finishSpeaking, { once: true });
+    speechSynthesis.speak(utterance);
   }
 
   async function speak(text) {
@@ -204,15 +250,22 @@ function initPanel() {
     stopSpeaking();
     try {
       const response = await api('/tts', { text }, { raw: true });
-      const url = URL.createObjectURL(await response.blob());
 
+      // A JSON body means "say this yourself with an OS voice"; anything else
+      // is audio the provider generated for us.
+      if ((response.headers.get('content-type') || '').includes('application/json')) {
+        const payload = await response.json();
+        if (payload && payload.mode === 'system') return speakWithSystemVoice(payload.text, payload.voice);
+        throw new Error((payload && payload.error) || 'The voice service returned no audio');
+      }
+
+      const url = URL.createObjectURL(await response.blob());
       audioElement = new Audio(url);
       equalizer.hidden = false;
       setStatus('speaking', 'busy');
 
       const done = () => {
-        equalizer.hidden = true;
-        if (!busy) setStatus('online');
+        finishSpeaking();
         URL.revokeObjectURL(url);
         if (audioElement && audioElement.src === url) audioElement = null;
       };
@@ -221,8 +274,7 @@ function initPanel() {
 
       await audioElement.play();
     } catch (error) {
-      equalizer.hidden = true;
-      if (!busy) setStatus('online');
+      finishSpeaking();
       console.warn('[buddy] voice reply failed:', error.message);
     }
   }
@@ -255,7 +307,155 @@ function initPanel() {
     }
   }
 
+  // ── saved conversations ─────────────────────────────────────────────────
+
+  const drawer = $('drawer');
+  const chatList = $('chat-list');
+  const clearButton = $('clear-history');
+  const saveToggle = $('save-history');
+  let clearArmed = false;
+
+  function greet() {
+    messages.replaceChildren();
+    addMessage('buddy', "Hey! I'm Buddy. Ask me anything, or say **“Hey Buddy”** any time.", { markdown: true });
+  }
+
+  function formatWhen(iso) {
+    const then = new Date(iso);
+    if (Number.isNaN(then.getTime())) return '';
+    const today = new Date();
+    const sameDay = then.toDateString() === today.toDateString();
+    if (sameDay) return then.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    const thisYear = then.getFullYear() === today.getFullYear();
+    return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(thisYear ? {} : { year: 'numeric' }) });
+  }
+
+  function renderChatList(chats) {
+    chatList.replaceChildren();
+
+    if (!chats.length) {
+      const empty = document.createElement('p');
+      empty.className = 'drawer-empty';
+      empty.textContent = runtime.saveHistory
+        ? "No saved chats yet. Anything you ask will be kept here on this device so you can come back to it."
+        : 'Saving is turned off, so nothing is being kept.';
+      chatList.appendChild(empty);
+      return;
+    }
+
+    for (const chat of chats) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'chat-row' + (chat.id === sessionId ? ' is-current' : '');
+
+      const main = document.createElement('span');
+      main.className = 'chat-row-main';
+
+      const title = document.createElement('span');
+      title.className = 'chat-row-title';
+      title.textContent = chat.title;
+
+      const meta = document.createElement('span');
+      meta.className = 'chat-row-meta';
+      const when = formatWhen(chat.updatedAt);
+      meta.textContent = `${when}${when ? ' · ' : ''}${chat.messageCount} message${chat.messageCount === 1 ? '' : 's'}`;
+
+      main.append(title, meta);
+
+      const remove = document.createElement('span');
+      remove.className = 'chat-row-del';
+      remove.setAttribute('role', 'button');
+      remove.setAttribute('tabindex', '0');
+      remove.title = 'Delete this chat';
+      remove.innerHTML =
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
+
+      row.append(main, remove);
+
+      remove.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        try {
+          await api(`/chats/${chat.id}`, undefined, { method: 'DELETE' });
+          if (chat.id === sessionId) {
+            sessionId = null;
+            greet();
+          }
+          await openDrawer();
+        } catch (error) {
+          console.warn('[buddy] could not delete chat:', error.message);
+        }
+      });
+
+      row.addEventListener('click', () => loadConversation(chat.id));
+      chatList.appendChild(row);
+    }
+  }
+
+  async function openDrawer() {
+    drawer.hidden = false;
+    $('drawer-note').textContent = runtime.saveHistory ? 'saved on this device' : 'saving is off';
+    saveToggle.checked = Boolean(runtime.saveHistory);
+    try {
+      const { chats } = await api('/chats');
+      renderChatList(chats);
+    } catch (error) {
+      chatList.replaceChildren();
+      const failed = document.createElement('p');
+      failed.className = 'drawer-empty';
+      failed.textContent = `Couldn't read your chats: ${error.message}`;
+      chatList.appendChild(failed);
+    }
+  }
+
+  function closeDrawer() {
+    drawer.hidden = true;
+    resetClearButton();
+  }
+
+  async function loadConversation(id) {
+    try {
+      const { chat } = await api(`/chats/${id}`);
+      stopSpeaking();
+      sessionId = chat.id;
+      messages.replaceChildren();
+      for (const message of chat.messages) {
+        if (message.role === 'assistant') addMessage('buddy', message.content, { markdown: true });
+        else addMessage('user', message.content);
+      }
+      closeDrawer();
+      setStatus('online');
+      input.focus();
+    } catch (error) {
+      addMessage('error', `Couldn't open that chat: ${error.message}`);
+      closeDrawer();
+    }
+  }
+
+  function resetClearButton() {
+    clearArmed = false;
+    clearButton.classList.remove('confirming');
+    clearButton.textContent = 'Delete all saved chats';
+  }
+
+  // ── voice input ─────────────────────────────────────────────────────────
+
+  function applyVoiceInputAvailability() {
+    const available = voiceInputAvailable();
+    micButton.disabled = !available || busy;
+    micButton.title = available
+      ? 'Tap to talk, tap again to send'
+      : 'Voice input is off — turn it on in your settings file to use the mic';
+  }
+
   async function startRecording() {
+    if (!voiceInputAvailable()) {
+      addMessage(
+        'error',
+        'Voice input is turned off, so I have no way to hear you. Typing works exactly the same.'
+      );
+      return;
+    }
+
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -289,7 +489,9 @@ function initPanel() {
       setBusy(true);
       setStatus('transcribing', 'busy');
       try {
-        const { text } = await api('/asr', { audio: await blobToBase64(blob) });
+        // The mime type matters to local Whisper servers, which sniff the
+        // container from the filename before handing the clip to ffmpeg.
+        const { text } = await api('/asr', { audio: await blobToBase64(blob), mimeType: blob.type });
         setBusy(false);
         if (text && text.trim()) {
           input.value = text.trim();
@@ -339,6 +541,61 @@ function initPanel() {
     window.buddy.closePanel();
   });
 
+  $('history-btn').addEventListener('click', () => {
+    if (drawer.hidden) openDrawer();
+    else closeDrawer();
+  });
+
+  $('drawer-close').addEventListener('click', closeDrawer);
+
+  $('new-chat').addEventListener('click', () => {
+    stopSpeaking();
+    stopRecording();
+    // The old conversation is already on disk; starting fresh just detaches it.
+    sessionId = null;
+    closeDrawer();
+    greet();
+    setStatus('online');
+    input.focus();
+  });
+
+  saveToggle.addEventListener('change', async () => {
+    try {
+      const { runtime: updated } = await api('/settings', { saveHistory: saveToggle.checked });
+      runtime = { ...runtime, ...updated };
+      $('drawer-note').textContent = runtime.saveHistory ? 'saved on this device' : 'saving is off';
+    } catch (error) {
+      saveToggle.checked = !saveToggle.checked;
+      console.warn('[buddy] could not change the save setting:', error.message);
+    }
+  });
+
+  // Deleting everything is worth a second tap rather than a modal.
+  clearButton.addEventListener('click', async () => {
+    if (!clearArmed) {
+      clearArmed = true;
+      clearButton.classList.add('confirming');
+      clearButton.textContent = 'Really delete every chat?';
+      setTimeout(() => {
+        if (clearArmed) resetClearButton();
+      }, 4000);
+      return;
+    }
+    try {
+      await api('/chats', undefined, { method: 'DELETE' });
+      sessionId = null;
+      greet();
+      resetClearButton();
+      await openDrawer();
+    } catch (error) {
+      console.warn('[buddy] could not clear history:', error.message);
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !drawer.hidden) closeDrawer();
+  });
+
   // Links must open in the real browser, never inside Buddy.
   messages.addEventListener('click', (event) => {
     const link = event.target.closest('a[data-external]');
@@ -356,9 +613,21 @@ function initPanel() {
   });
 
   updateSpeakerButton();
+  applyVoiceInputAvailability();
   setStatus('online');
-  addMessage('buddy', "Hey! I'm Buddy. Ask me anything, or say **“Hey Buddy”** any time.", { markdown: true });
+  greet();
   input.focus();
+
+  // Pick up where the last conversation left off, so reopening Buddy feels
+  // continuous rather than amnesiac.
+  (async () => {
+    try {
+      const { chats } = await api('/chats');
+      if (chats.length) await loadConversation(chats[0].id);
+    } catch {
+      /* a fresh install, or history is unreadable — the greeting stands */
+    }
+  })();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -479,6 +748,7 @@ function initOrb() {
     const hot = running && wakeEnabled && !panelVisible;
     stage.classList.toggle('hot', hot);
     tooltip.textContent = hot ? "Listening for 'Hey Buddy'" : 'Ask Buddy';
+    if (!voiceInputAvailable()) tooltip.textContent = 'Ask Buddy (voice input off)';
   }
 
   // ── click vs. drag ──────────────────────────────────────────────────────
@@ -690,7 +960,9 @@ function initOrb() {
   function applyWakePreference(enabled) {
     wakeEnabled = Boolean(enabled);
     localStorage.setItem('buddy:wake', wakeEnabled ? 'on' : 'off');
-    if (wakeEnabled) startListening();
+    // With no way to transcribe, opening the microphone would be pointless —
+    // and worse, dishonest about what Buddy is doing with it.
+    if (wakeEnabled && voiceInputAvailable()) startListening();
     else stopListening();
     refreshHotState();
   }
@@ -716,41 +988,230 @@ function initOrb() {
 
 function initSetup() {
   const form = $('setup-form');
-  const baseUrlInput = $('setup-baseurl');
-  const keyInput = $('setup-key');
   const saveButton = $('setup-save');
   const errorBox = $('setup-error');
+  const privacyNote = $('setup-privacy');
+
+  const tabs = { local: $('tab-local'), cloud: $('tab-cloud') };
+  const panes = { local: $('pane-local'), cloud: $('pane-cloud') };
+
+  const baseUrlInput = $('setup-baseurl');
+  const keyInput = $('setup-key');
+  const modelSelect = $('setup-model');
+  const modelManual = $('setup-model-manual');
+  const voiceSelect = $('setup-voice');
+  const asrSelect = $('setup-asr');
+  const whisperUrl = $('setup-whisper-url');
+  const probe = $('probe-ollama');
+  const probeText = $('probe-text');
+
+  let mode = 'cloud';
+  let ollamaUp = false;
 
   function showError(message) {
     errorBox.textContent = message;
     errorBox.hidden = false;
   }
 
-  // Closing setup without a key ends the run — Buddy can't do anything without one.
+  // Closing setup without finishing ends the run — Buddy has nothing to run on.
   $('setup-close').addEventListener('click', () => window.close());
+
+  // ── honest privacy copy, recomputed from the actual choices ─────────────
+
+  function describePrivacy() {
+    if (mode === 'cloud') {
+      return (
+        'Your key is stored unencrypted in this app’s local data folder and sent only to z-ai. ' +
+        'Your messages, voice clips and wake-word audio go to z-ai to be processed. ' +
+        'Chats are saved on this device.'
+      );
+    }
+    const asr = asrSelect.value;
+    if (asr === 'z-ai') {
+      return (
+        'Thinking and speaking stay on this machine. Only voice input goes to z-ai — including short ' +
+        'wake-word clips whenever a sound looks like speech. Chats are saved on this device.'
+      );
+    }
+    if (asr === 'whisper') {
+      return (
+        'Nothing leaves this machine: thinking, speaking and listening all run locally, so ambient audio ' +
+        'stays on your device. Chats are saved on this device.'
+      );
+    }
+    return (
+      'Nothing leaves this machine, and with voice input off Buddy never opens your microphone. ' +
+      'Chats are saved on this device.'
+    );
+  }
+
+  function refreshCopy() {
+    privacyNote.textContent = describePrivacy();
+
+    const asr = asrSelect.value;
+    whisperUrl.hidden = asr !== 'whisper';
+    if (asr === 'whisper') {
+      $('asr-hint').textContent =
+        'Point this at any OpenAI-compatible transcription server — faster-whisper-server, Speaches or LocalAI.';
+    } else if (asr === 'z-ai') {
+      $('asr-hint').textContent =
+        'Needs a z-ai key. Switch to the z-ai tab to enter one, then come back — or leave voice input off.';
+    } else {
+      $('asr-hint').textContent =
+        'With voice input off, Buddy never opens your microphone. You can turn it on later.';
+    }
+  }
+
+  function selectMode(next) {
+    mode = next;
+    for (const key of ['local', 'cloud']) {
+      const on = key === next;
+      tabs[key].classList.toggle('is-on', on);
+      tabs[key].setAttribute('aria-selected', String(on));
+      panes[key].hidden = !on;
+    }
+    refreshCopy();
+    if (next === 'cloud') keyInput.focus();
+  }
+
+  tabs.local.addEventListener('click', () => selectMode('local'));
+  tabs.cloud.addEventListener('click', () => selectMode('cloud'));
+  asrSelect.addEventListener('change', refreshCopy);
+
+  // ── what the machine actually has ──────────────────────────────────────
+
+  function loadSystemVoices() {
+    const fill = () => {
+      const voices = speechSynthesis.getVoices().filter((voice) => voice.localService !== false);
+      if (!voices.length) return false;
+      voiceSelect.replaceChildren();
+      for (const voice of voices) {
+        const option = document.createElement('option');
+        option.value = voice.name;
+        option.textContent = `${voice.name} (${voice.lang})`;
+        voiceSelect.appendChild(option);
+      }
+      const english = voices.findIndex((voice) => voice.lang.startsWith('en'));
+      voiceSelect.selectedIndex = english >= 0 ? english : 0;
+      $('voice-hint').textContent = `${voices.length} offline voice${voices.length === 1 ? '' : 's'} found on this system.`;
+      return true;
+    };
+
+    if (fill()) return;
+    // Chromium populates the voice list asynchronously on first call.
+    speechSynthesis.addEventListener('voiceschanged', fill, { once: true });
+    setTimeout(fill, 600);
+  }
+
+  async function probeOllama() {
+    try {
+      const status = await api('/providers/status');
+      ollamaUp = status.ollama.reachable;
+
+      if (!ollamaUp) {
+        probe.className = 'probe down';
+        probeText.innerHTML =
+          'No Ollama at <code>' +
+          escapeHtml(status.ollama.baseUrl) +
+          '</code>. Install it from ollama.com, then run <code>ollama pull llama3.2</code>.';
+        modelSelect.hidden = true;
+        modelManual.hidden = false;
+        return;
+      }
+
+      const models = status.ollama.models;
+      if (!models.length) {
+        probe.className = 'probe down';
+        probeText.innerHTML = 'Ollama is running but has no models. Run <code>ollama pull llama3.2</code> first.';
+        modelSelect.hidden = true;
+        modelManual.hidden = false;
+        return;
+      }
+
+      probe.className = 'probe up';
+      probeText.textContent = `Ollama is running with ${models.length} model${models.length === 1 ? '' : 's'}.`;
+      modelSelect.hidden = false;
+      modelManual.hidden = true;
+      modelSelect.replaceChildren();
+      for (const name of models) {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        modelSelect.appendChild(option);
+      }
+    } catch (error) {
+      probe.className = 'probe down';
+      probeText.textContent = `Couldn't check for Ollama: ${error.message}`;
+      modelSelect.hidden = true;
+      modelManual.hidden = false;
+    }
+  }
+
+  // ── save ───────────────────────────────────────────────────────────────
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     errorBox.hidden = true;
 
-    const baseUrl = baseUrlInput.value.trim();
-    const apiKey = keyInput.value.trim();
-    if (!baseUrl || !apiKey) return showError('Both the base URL and the API key are required.');
+    const finish = async (settings, credentials) => {
+      saveButton.disabled = true;
+      saveButton.textContent = 'Saving…';
+      try {
+        if (credentials) await api('/setup', credentials);
+        await api('/settings', settings);
+        saveButton.textContent = 'All set!';
+        window.buddy.setupComplete();
+      } catch (error) {
+        showError(error.message);
+        saveButton.disabled = false;
+        saveButton.textContent = 'Save and start Buddy';
+      }
+    };
 
-    saveButton.disabled = true;
-    saveButton.textContent = 'Saving…';
-    try {
-      await api('/setup', { baseUrl, apiKey });
-      saveButton.textContent = 'All set!';
-      window.buddy.setupComplete();
-    } catch (error) {
-      showError(error.message);
-      saveButton.disabled = false;
-      saveButton.textContent = 'Save and start Buddy';
+    if (mode === 'cloud') {
+      const baseUrl = baseUrlInput.value.trim();
+      const apiKey = keyInput.value.trim();
+      if (!baseUrl || !apiKey) return showError('Both the base URL and the API key are required.');
+      return finish(
+        {
+          chat: { provider: 'z-ai' },
+          tts: { provider: 'z-ai', voice: 'tongtong' },
+          asr: { provider: 'z-ai' },
+        },
+        { baseUrl, apiKey }
+      );
     }
+
+    const model = (modelManual.hidden ? modelSelect.value : modelManual.value).trim();
+    if (!model) return showError('Pick a model, or type the name of one you have pulled in Ollama.');
+
+    const asr = asrSelect.value;
+    if (asr === 'z-ai') {
+      const apiKey = keyInput.value.trim();
+      const baseUrl = baseUrlInput.value.trim();
+      if (!apiKey || !baseUrl) {
+        return showError('Voice input via z-ai needs a key — add one on the z-ai tab, or set voice input to off.');
+      }
+      return finish(
+        {
+          chat: { provider: 'ollama', model },
+          tts: { provider: 'system', voice: voiceSelect.value },
+          asr: { provider: 'z-ai' },
+        },
+        { baseUrl, apiKey }
+      );
+    }
+
+    return finish({
+      chat: { provider: 'ollama', model },
+      tts: { provider: 'system', voice: voiceSelect.value },
+      asr: asr === 'whisper' ? { provider: 'whisper', baseUrl: whisperUrl.value.trim() } : { provider: 'off' },
+    });
   });
 
-  keyInput.focus();
+  loadSystemVoices();
+  probeOllama();
+  selectMode('cloud');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -766,6 +1227,8 @@ async function main() {
 
   // Nothing may talk to the server before we know the port and the token.
   boot = await window.buddy.getBoot();
+  // Where each capability runs decides what the UI can offer.
+  await refreshRuntime();
 
   if (MODE === 'orb') initOrb();
   else if (MODE === 'setup') initSetup();

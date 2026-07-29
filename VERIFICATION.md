@@ -138,6 +138,57 @@ A robustness bug was found and fixed here: the scroll-reveal animation left abov
 a `.js` class and above-the-fold elements are shown immediately, so the page is fully readable even
 if scripting is slow, throttled or disabled entirely.
 
+---
+
+## Local providers and saved chats
+
+Added after the first round: each capability can now run locally, and conversations persist to disk.
+
+### Server side — 38 assertions, all passing
+
+Verified against stub servers speaking the **real** Ollama and OpenAI-transcription wire protocols,
+because neither Ollama nor a Whisper server is installed on this machine.
+
+| Area | Confirmed |
+| --- | --- |
+| Provider switching | `/settings` accepts all three capabilities, reports `fullyLocal: true`, and lists no cloud capabilities |
+| Configured without a key | Local mode reports `configured: true` with no `.z-ai-config` present at all |
+| Ollama chat | Correct model, `stream: false`, system prompt first, and reply read off `.message.content` |
+| Context growth | Turn two sent 4 messages where turn one sent 2 — history is fed back as context |
+| System voice | `/tts` returns `{ mode: 'system', text, voice }` rather than audio, so nothing goes over the network |
+| Local transcription | Clip posted as a genuine multipart file with a `clip.webm` filename; transcript read back |
+| Provider probe | Ollama reported reachable with its model list; Whisper reachability detected |
+| Persistence | Conversation written to `chats/<uuid>.json` with timestamps; title derived from the first message |
+| Rename / delete / clear | All work, and removal takes the file off disk |
+| **Survives a restart** | A **second process** read the conversations back off disk with titles, messages and replies intact |
+| Guards | Non-UUID ids 404; `..%2F..%2Fsecret` traversal in an id refused; history needs the token; wrong method gives 405 not 404 |
+
+### The app, driven for real
+
+A stub was bound to Ollama's **actual default port** (`127.0.0.1:11434`) so the real discovery path
+was exercised, then the app was driven with synthetic clicks and keystrokes:
+
+- **First-run setup** offers both modes. Selecting *On this machine* probed the local stack live and
+  reported “Ollama is running with 3 models”, listed those models, and found **3 offline system
+  voices** (`localService: true`) with no configuration.
+- **The privacy copy is generated from the actual choices**, not hardcoded. With hearing off it reads
+  “Nothing leaves this machine, and with voice input off Buddy never opens your microphone.” Choosing
+  z-ai hearing changes it to name exactly what gets sent.
+- **Saving wrote the expected `buddy-settings.json`** (`chat: ollama/llama3.2:latest`, `tts: system`,
+  `asr: off`) and started the orb and panel.
+- **Two full conversational turns went through the local model.** The stub logged
+  `model=llama3.2:latest messages=2` then `messages=4`, proving both dispatch and context growth. The
+  replies rendered with markdown bold and bullet lists.
+- **The OS voice really spoke.** The panel header showed `speaking` with the equaliser animating,
+  which on the system-TTS path only happens inside `speakWithSystemVoice` — the renderer path, no
+  network involved.
+- **The history drawer listed both conversations** newest-first with times and message counts, the
+  current one highlighted, plus the save toggle and delete-all control.
+- **Clicking an older conversation reopened it exactly as it was**, all four messages with markdown
+  intact.
+- **With hearing off the mic button is disabled**, visibly dimmed against the same button in cloud
+  mode, and the wake word does not open the microphone at all.
+
 ### Extra checks not in the spec
 
 - **Markdown renderer and wake-phrase matcher — 38 assertions, all passing.** Covers bold, italics,
@@ -158,6 +209,15 @@ if scripting is slow, throttled or disabled entirely.
 
 These need a real key, a live microphone, or another operating system. They are **untested**, not
 known-broken.
+
+**Needs a real Ollama / Whisper install**
+
+- Buddy's client code is verified against the documented wire protocols, but no **real** Ollama or
+  Whisper server has answered it. The stubs return the right shapes; a real model could differ in
+  ways stubs cannot reveal — chiefly response latency (a slow first token on a cold model) and
+  whether a given Whisper build accepts webm/opus directly or needs ffmpeg present.
+- Actual model quality, memory use and speed on this hardware are unknown.
+- The `whisper` transcription path has never seen genuine audio, only a 2 KB buffer of filler bytes.
 
 **Needs a real z-ai API key**
 

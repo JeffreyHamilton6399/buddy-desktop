@@ -36,6 +36,16 @@
             <span class="panel-status" id="status">connecting…</span>
           </div>
           <div class="panel-actions">
+            <button class="icon-btn" id="history-btn" type="button" title="Your chats" aria-label="Show saved chats">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h10" />
+              </svg>
+            </button>
+            <button class="icon-btn" id="new-chat" type="button" title="New chat" aria-label="Start a new chat">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
             <button
               class="icon-btn"
               id="speaker"
@@ -58,7 +68,32 @@
           </div>
         </header>
 
-        <div class="messages" id="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+        <div class="panel-body">
+          <div class="messages" id="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+
+          <!-- Saved conversations, slid over the messages -->
+          <aside class="drawer" id="drawer" hidden aria-label="Saved chats">
+            <header class="drawer-head">
+              <strong>Your chats</strong>
+              <span class="drawer-note" id="drawer-note">saved on this device</span>
+              <button class="icon-btn" id="drawer-close" type="button" title="Back to chat" aria-label="Back to chat">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </header>
+
+            <div class="drawer-list" id="chat-list"></div>
+
+            <footer class="drawer-foot">
+              <label class="switch">
+                <input type="checkbox" id="save-history" checked />
+                <span>Save new chats to this device</span>
+              </label>
+              <button class="danger" id="clear-history" type="button">Delete all saved chats</button>
+            </footer>
+          </aside>
+        </div>
 
         <div class="equalizer" id="equalizer" hidden aria-hidden="true">
           <i></i><i></i><i></i><i></i><i></i>
@@ -98,34 +133,81 @@
         </button>
         <div class="setup-orb" aria-hidden="true"></div>
         <h1>Hey, I'm Buddy.</h1>
-        <p class="setup-lede">
-          I run on your machine and talk straight to the AI with your own key — no middleman server.
-          Paste your z-ai details once and I'll keep them here on this device.
-        </p>
+        <p class="setup-lede">Where should I do my thinking? You can change this whenever you like.</p>
+
+        <div class="mode-tabs" role="tablist">
+          <button class="mode-tab" id="tab-local" type="button" role="tab" aria-selected="false">
+            <strong>On this machine</strong>
+            <small>Nothing leaves your device</small>
+          </button>
+          <button class="mode-tab is-on" id="tab-cloud" type="button" role="tab" aria-selected="true">
+            <strong>z-ai cloud</strong>
+            <small>Just needs your key</small>
+          </button>
+        </div>
 
         <form id="setup-form">
-          <label for="setup-baseurl">API base URL</label>
-          <input
-            id="setup-baseurl"
-            type="url"
-            value="https://api.z.ai/api/paas/v4"
-            spellcheck="false"
-            autocomplete="off"
-            required
-          />
-          <p class="setup-hint">Must be the endpoint that serves <code>/chat/completions</code>, <code>/audio/tts</code> and <code>/audio/asr</code>.</p>
+          <!-- ── cloud ─────────────────────────────────────────────── -->
+          <div class="mode-pane" id="pane-cloud">
+            <label for="setup-baseurl">API base URL</label>
+            <input
+              id="setup-baseurl"
+              type="url"
+              value="https://api.z.ai/api/paas/v4"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <p class="setup-hint">
+              Must be the endpoint that serves <code>/chat/completions</code>, <code>/audio/tts</code> and
+              <code>/audio/asr</code>.
+            </p>
 
-          <label for="setup-key">API key</label>
-          <input id="setup-key" type="password" placeholder="Your z-ai API key" spellcheck="false" autocomplete="off" required />
+            <label for="setup-key">API key</label>
+            <input id="setup-key" type="password" placeholder="Your z-ai API key" spellcheck="false" autocomplete="off" />
+          </div>
+
+          <!-- ── local ─────────────────────────────────────────────── -->
+          <div class="mode-pane" id="pane-local" hidden>
+            <div class="probe" id="probe-ollama">
+              <span class="probe-dot" aria-hidden="true"></span>
+              <span id="probe-text">Looking for Ollama…</span>
+            </div>
+
+            <label for="setup-model">Model</label>
+            <select id="setup-model"></select>
+            <input id="setup-model-manual" type="text" placeholder="e.g. llama3.2" spellcheck="false" hidden />
+            <p class="setup-hint" id="model-hint">
+              Buddy talks to Ollama on this machine. No key, no account, works offline.
+            </p>
+
+            <label for="setup-voice">Voice replies</label>
+            <select id="setup-voice"></select>
+            <p class="setup-hint" id="voice-hint">Uses the voices already installed on your system.</p>
+
+            <label for="setup-asr">Voice input <span class="opt">(mic + “Hey Buddy”)</span></label>
+            <select id="setup-asr">
+              <option value="off">Off — type to Buddy</option>
+              <option value="whisper">Local Whisper server</option>
+              <option value="z-ai">z-ai cloud (needs a key)</option>
+            </select>
+            <input
+              id="setup-whisper-url"
+              type="url"
+              value="http://127.0.0.1:8000/v1"
+              spellcheck="false"
+              autocomplete="off"
+              hidden
+            />
+            <p class="setup-hint" id="asr-hint">
+              With voice input off, Buddy never opens your microphone. You can turn it on later.
+            </p>
+          </div>
 
           <p class="setup-error" id="setup-error" role="alert" hidden></p>
           <button class="setup-save" id="setup-save" type="submit">Save and start Buddy</button>
         </form>
 
-        <p class="setup-note">
-          Stored unencrypted in this app's local data folder, and sent only to the AI provider.
-          Your chats, voice clips and wake-word audio go to that provider to be processed.
-        </p>
+        <p class="setup-note" id="setup-privacy"></p>
       </section>
     </div>
 

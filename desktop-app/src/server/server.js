@@ -2,9 +2,23 @@
  * Buddy's local server.
  *
  * Plain Node http, bound to 127.0.0.1 on an OS-assigned port. It is the only
- * place the z-ai key is ever read or used — the renderer never sees it.
+ * place the z-ai key is ever read, and the only thing that touches the chat
+ * history on disk. The renderer sees neither.
  *
- * Endpoints: GET /health, POST /setup, POST /chat, POST /tts, POST /asr
+ * Endpoints
+ *   GET    /health              is Buddy usable, and where does each capability run
+ *   GET    /settings            current provider choices (never any secret)
+ *   POST   /settings            change provider choices
+ *   GET    /providers/status    probe the local stack: is Ollama up, which models
+ *   POST   /setup               store the z-ai baseUrl + key
+ *   POST   /chat                send a message, get a reply
+ *   POST   /tts                 speak text (audio bytes, or a hand-off to the OS voice)
+ *   POST   /asr                 transcribe an audio clip
+ *   GET    /chats               list saved conversations
+ *   GET    /chats/:id           read one conversation
+ *   PATCH  /chats/:id           rename one conversation
+ *   DELETE /chats/:id           delete one conversation
+ *   DELETE /chats               delete every conversation
  */
 'use strict';
 
@@ -13,6 +27,9 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+
+const providers = require('./providers.js');
+const { History } = require('./history.js');
 
 // ── SDK facts, verified against z-ai-web-dev-sdk@0.0.18 ────────────────────
 // The published spec guessed at these; the real package differs, so:
@@ -27,21 +44,25 @@ const crypto = require('crypto');
 // ───────────────────────────────────────────────────────────────────────────
 
 const CONFIG_FILENAME = '.z-ai-config';
+const SETTINGS_FILENAME = 'buddy-settings.json';
+
 const SYSTEM_PROMPT =
   'You are Buddy, a friendly, warm, concise local AI assistant that lives on ' +
   "the user's desktop. Keep replies short, natural, and friendly — like a " +
   'helpful companion. Avoid long lists unless asked.';
 
-const DEFAULT_VOICE = 'tongtong';
 const MAX_TTS_CHARS = 1024;
-const MAX_HISTORY = 20;
+const CONTEXT_MESSAGES = 20; // how much of a conversation the model is shown
 const MAX_BODY_BYTES = 12 * 1024 * 1024; // audio clips arrive as base64
-const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
-/** Where `.z-ai-config` lives. Electron passes userData; standalone uses cwd. */
+/** Where config, settings and chats live. Electron passes userData. */
 function configDir() {
   return process.env.BUDDY_CONFIG_DIR || process.cwd();
 }
+
+const history = new History(configDir);
+
+// ── z-ai credentials ──────────────────────────────────────────────────────
 
 function configPath() {
   return path.join(configDir(), CONFIG_FILENAME);
@@ -67,6 +88,53 @@ async function writeConfig({ apiKey, baseUrl }) {
   } catch {
     /* not fatal */
   }
+}
+
+// ── provider settings ─────────────────────────────────────────────────────
+
+function settingsPath() {
+  return path.join(configDir(), SETTINGS_FILENAME);
+}
+
+let settingsCache = null;
+
+function readSettings() {
+  if (settingsCache) return settingsCache;
+  try {
+    settingsCache = providers.normaliseSettings(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')));
+  } catch {
+    settingsCache = providers.normaliseSettings(null);
+  }
+  return settingsCache;
+}
+
+function settingsFileExists() {
+  return fs.existsSync(settingsPath());
+}
+
+async function writeSettings(patch) {
+  const merged = providers.normaliseSettings({
+    ...readSettings(),
+    ...patch,
+    chat: { ...readSettings().chat, ...(patch.chat || {}) },
+    tts: { ...readSettings().tts, ...(patch.tts || {}) },
+    asr: { ...readSettings().asr, ...(patch.asr || {}) },
+  });
+  await fsp.mkdir(configDir(), { recursive: true });
+  await fsp.writeFile(settingsPath(), JSON.stringify(merged, null, 2));
+  settingsCache = merged;
+  return merged;
+}
+
+/**
+ * Can Buddy actually work right now? A missing settings file means first run.
+ * Any capability still pointing at z-ai needs the key to be present.
+ */
+function isConfigured() {
+  if (!settingsFileExists()) return Boolean(readConfig()); // pre-settings installs
+  const settings = readSettings();
+  if (providers.cloudCapabilities(settings).length === 0) return true;
+  return Boolean(readConfig());
 }
 
 // ── z-ai client (lazy, memoised, invalidated by /setup) ────────────────────
@@ -117,29 +185,6 @@ async function getZai() {
   return zaiPromise;
 }
 
-// ── conversation memory ───────────────────────────────────────────────────
-
-/** sessionId -> { messages: ChatMessage[], touched: number } */
-const sessions = new Map();
-
-function getSession(sessionId) {
-  const id = sessionId && typeof sessionId === 'string' ? sessionId : crypto.randomUUID();
-  let session = sessions.get(id);
-  if (!session) {
-    session = { messages: [], touched: Date.now() };
-    sessions.set(id, session);
-  }
-  session.touched = Date.now();
-  return { id, session };
-}
-
-function pruneSessions() {
-  const cutoff = Date.now() - SESSION_TTL_MS;
-  for (const [id, session] of sessions) {
-    if (session.touched < cutoff) sessions.delete(id);
-  }
-}
-
 // ── response shape helpers (providers vary; be forgiving) ─────────────────
 
 function extractReply(completion) {
@@ -147,9 +192,12 @@ function extractReply(completion) {
   if (typeof completion === 'string') return completion;
   const choice = completion.choices && completion.choices[0];
   const text =
+    // Ollama's native shape comes first, then the OpenAI one.
+    (completion.message && completion.message.content) ||
     (choice && choice.message && choice.message.content) ||
     (choice && choice.delta && choice.delta.content) ||
     (choice && choice.text) ||
+    completion.response ||
     completion.reply ||
     completion.content ||
     '';
@@ -221,7 +269,7 @@ function isAllowedOrigin(origin) {
 function applyCors(req, res) {
   const origin = req.headers.origin;
   res.setHeader('Access-Control-Allow-Origin', isAllowedOrigin(origin) ? origin || 'null' : 'null');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Buddy-Token');
   res.setHeader('Access-Control-Max-Age', '600');
   res.setHeader('Vary', 'Origin');
@@ -273,6 +321,26 @@ function scrub(message) {
 
 // ── route handlers ────────────────────────────────────────────────────────
 
+function describeRuntime() {
+  const settings = readSettings();
+  return {
+    ok: true,
+    configured: isConfigured(),
+    firstRun: !settingsFileExists() && !readConfig(),
+    hasKey: Boolean(readConfig()),
+    providers: {
+      chat: settings.chat.provider,
+      tts: settings.tts.provider,
+      asr: settings.asr.provider,
+    },
+    chatModel: settings.chat.model || providers.OLLAMA_DEFAULT_MODEL,
+    ttsVoice: settings.tts.voice,
+    cloud: providers.cloudCapabilities(settings),
+    fullyLocal: providers.isFullyLocal(settings),
+    saveHistory: settings.saveHistory,
+  };
+}
+
 async function handleSetup(req, res) {
   const body = await readBody(req);
   const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
@@ -289,8 +357,26 @@ async function handleSetup(req, res) {
   }
   await writeConfig({ apiKey, baseUrl: baseUrl.replace(/\/+$/, '') });
   resetZai();
-  console.log('[buddy] config saved to', configPath());
+  console.log('[buddy] z-ai credentials saved to', configPath());
   return sendJson(res, 200, { ok: true });
+}
+
+async function handleGetSettings(_req, res) {
+  return sendJson(res, 200, { settings: readSettings(), runtime: describeRuntime() });
+}
+
+async function handlePostSettings(req, res) {
+  const body = await readBody(req);
+  const settings = await writeSettings(body && typeof body === 'object' ? body : {});
+  console.log(
+    `[buddy] providers → chat:${settings.chat.provider} tts:${settings.tts.provider} asr:${settings.asr.provider}`
+  );
+  return sendJson(res, 200, { ok: true, settings, runtime: describeRuntime() });
+}
+
+async function handleProviderStatus(_req, res) {
+  const status = await providers.probeProviders(readSettings());
+  return sendJson(res, 200, status);
 }
 
 async function handleChat(req, res) {
@@ -300,48 +386,64 @@ async function handleChat(req, res) {
     return sendJson(res, 400, { error: 'messages must be a non-empty array' });
   }
 
-  const { id, session } = getSession(body.sessionId);
+  const settings = readSettings();
+  await history.load();
+  const conversation = history.resolve(body.sessionId);
+
   for (const message of incoming) {
     if (!message || typeof message.content !== 'string' || !message.content.trim()) continue;
     const role = message.role === 'assistant' ? 'assistant' : 'user';
-    session.messages.push({ role, content: message.content.slice(0, 8000) });
-  }
-  if (session.messages.length > MAX_HISTORY) {
-    session.messages.splice(0, session.messages.length - MAX_HISTORY);
+    history.append(conversation, role, message.content.slice(0, 8000));
   }
 
-  const zai = await getZai();
-  const completion = await zai.chat.completions.create({
-    messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...session.messages],
-    thinking: { type: 'disabled' },
-  });
+  // The model only ever sees the tail of the conversation, however long it gets.
+  const context = conversation.messages.slice(-CONTEXT_MESSAGES).map(({ role, content }) => ({ role, content }));
+  const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...context];
+
+  let completion;
+  if (settings.chat.provider === 'ollama') {
+    completion = await providers.ollamaChat({
+      baseUrl: settings.chat.baseUrl,
+      model: settings.chat.model,
+      messages,
+    });
+  } else {
+    const zai = await getZai();
+    completion = await zai.chat.completions.create({ messages, thinking: { type: 'disabled' } });
+  }
 
   const reply = extractReply(completion);
-  if (!reply) throw new Error('The AI provider returned an empty reply');
+  if (!reply) throw new Error('The model returned an empty reply');
 
-  session.messages.push({ role: 'assistant', content: reply });
-  if (session.messages.length > MAX_HISTORY) {
-    session.messages.splice(0, session.messages.length - MAX_HISTORY);
-  }
-  pruneSessions();
-  return sendJson(res, 200, { reply, sessionId: id });
+  history.append(conversation, 'assistant', reply);
+  if (settings.saveHistory) await history.persist(conversation);
+
+  return sendJson(res, 200, {
+    reply,
+    sessionId: conversation.id,
+    title: conversation.title,
+    saved: settings.saveHistory,
+  });
 }
 
 async function handleTts(req, res) {
   const body = await readBody(req);
   const raw = typeof body.text === 'string' ? body.text.trim() : '';
   if (!raw) return sendJson(res, 400, { error: 'text is required' });
+
+  const settings = readSettings();
   const input = raw.slice(0, MAX_TTS_CHARS);
-  const voice = typeof body.voice === 'string' && body.voice.trim() ? body.voice.trim() : DEFAULT_VOICE;
+  const voice = typeof body.voice === 'string' && body.voice.trim() ? body.voice.trim() : settings.tts.voice;
+
+  // The OS voices live in the renderer process, so hand the text back and let
+  // speechSynthesis say it. Nothing leaves the machine on this path.
+  if (settings.tts.provider === 'system') {
+    return sendJson(res, 200, { mode: 'system', text: input, voice });
+  }
 
   const zai = await getZai();
   // Verified: the key is `input`, and this resolves to a raw Response.
-  const response = await zai.audio.tts.create({
-    input,
-    voice,
-    response_format: 'wav',
-    stream: false,
-  });
+  const response = await zai.audio.tts.create({ input, voice, response_format: 'wav', stream: false });
 
   let audio = null;
   let contentType = 'audio/wav';
@@ -378,21 +480,103 @@ async function handleAsr(req, res) {
   const base64 = supplied.includes(',') ? supplied.slice(supplied.indexOf(',') + 1) : supplied;
   if (!base64.trim()) return sendJson(res, 400, { error: 'audio (base64) is required' });
 
+  const settings = readSettings();
+
+  if (settings.asr.provider === 'off') {
+    return sendJson(res, 400, {
+      error: 'Voice input is turned off. Add a local Whisper server, or switch hearing to z-ai.',
+      asrOff: true,
+    });
+  }
+
+  if (settings.asr.provider === 'whisper') {
+    const result = await providers.whisperTranscribe({
+      baseUrl: settings.asr.baseUrl,
+      model: settings.asr.model,
+      audio: Buffer.from(base64.trim(), 'base64'),
+      mimeType: typeof body.mimeType === 'string' ? body.mimeType : 'audio/webm',
+    });
+    return sendJson(res, 200, { text: extractTranscript(result) });
+  }
+
   const zai = await getZai();
   // Verified: the key is `file_base64`, and the transcript comes back on .text.
   const result = await zai.audio.asr.create({ file_base64: base64.trim() });
   return sendJson(res, 200, { text: extractTranscript(result) });
 }
 
-const ROUTES = {
-  'POST /setup': handleSetup,
-  'POST /chat': handleChat,
-  'POST /tts': handleTts,
-  'POST /asr': handleAsr,
-};
+// ── chat history ──────────────────────────────────────────────────────────
+
+async function handleListChats(_req, res) {
+  await history.load();
+  return sendJson(res, 200, { chats: history.list(), saveHistory: readSettings().saveHistory });
+}
+
+async function handleGetChat(_req, res, [id]) {
+  await history.load();
+  const conversation = history.get(id);
+  if (!conversation) return sendJson(res, 404, { error: 'No such conversation' });
+  return sendJson(res, 200, { chat: conversation });
+}
+
+async function handleRenameChat(req, res, [id]) {
+  const body = await readBody(req);
+  if (typeof body.title !== 'string' || !body.title.trim()) {
+    return sendJson(res, 400, { error: 'title is required' });
+  }
+  await history.load();
+  const conversation = await history.rename(id, body.title);
+  if (!conversation) return sendJson(res, 404, { error: 'No such conversation' });
+  return sendJson(res, 200, { ok: true, title: conversation.title });
+}
+
+async function handleDeleteChat(_req, res, [id]) {
+  await history.load();
+  const removed = await history.remove(id);
+  if (!removed) return sendJson(res, 404, { error: 'No such conversation' });
+  return sendJson(res, 200, { ok: true });
+}
+
+async function handleClearChats(_req, res) {
+  await history.load();
+  const count = await history.clear();
+  console.log(`[buddy] cleared ${count} conversation(s) from disk`);
+  return sendJson(res, 200, { ok: true, deleted: count });
+}
+
+// ── routing ───────────────────────────────────────────────────────────────
+
+const UUID = '([0-9a-fA-F-]{36})';
+
+const ROUTES = [
+  ['GET', /^\/health$/, (req, res) => sendJson(res, 200, describeRuntime())],
+  ['GET', /^\/settings$/, handleGetSettings],
+  ['POST', /^\/settings$/, handlePostSettings],
+  ['GET', /^\/providers\/status$/, handleProviderStatus],
+  ['POST', /^\/setup$/, handleSetup],
+  ['POST', /^\/chat$/, handleChat],
+  ['POST', /^\/tts$/, handleTts],
+  ['POST', /^\/asr$/, handleAsr],
+  ['GET', /^\/chats$/, handleListChats],
+  ['DELETE', /^\/chats$/, handleClearChats],
+  ['GET', new RegExp(`^/chats/${UUID}$`), handleGetChat],
+  ['PATCH', new RegExp(`^/chats/${UUID}$`), handleRenameChat],
+  ['DELETE', new RegExp(`^/chats/${UUID}$`), handleDeleteChat],
+];
+
+function matchRoute(method, pathname) {
+  let pathExists = false;
+  for (const [routeMethod, pattern, handler] of ROUTES) {
+    const match = pattern.exec(pathname);
+    if (!match) continue;
+    pathExists = true;
+    if (routeMethod === method) return { handler, params: match.slice(1) };
+  }
+  return { handler: null, params: [], pathExists };
+}
 
 async function router(req, res) {
-  const pathname = new URL(req.url, 'http://127.0.0.1').pathname.replace(/\/+$/, '') || '/';
+  const pathname = new URL(req.url, 'http://127.0.0.1').pathname.replace(/(.)\/+$/, '$1') || '/';
 
   applyCors(req, res);
 
@@ -405,10 +589,6 @@ async function router(req, res) {
     return sendJson(res, 403, { error: 'Origin not allowed' });
   }
 
-  if (req.method === 'GET' && pathname === '/health') {
-    return sendJson(res, 200, { ok: true, configured: Boolean(readConfig()) });
-  }
-
   if (!OPEN_ROUTES.has(pathname)) {
     const supplied = req.headers['x-buddy-token'];
     const expected = Buffer.from(AUTH_TOKEN);
@@ -418,11 +598,15 @@ async function router(req, res) {
     }
   }
 
-  const handler = ROUTES[`${req.method} ${pathname}`];
-  if (!handler) return sendJson(res, 404, { error: `No route for ${req.method} ${pathname}` });
+  const { handler, params, pathExists } = matchRoute(req.method, pathname);
+  if (!handler) {
+    return sendJson(res, pathExists ? 405 : 404, {
+      error: pathExists ? `${req.method} not allowed on ${pathname}` : `No route for ${req.method} ${pathname}`,
+    });
+  }
 
   try {
-    await handler(req, res);
+    await handler(req, res, params);
   } catch (error) {
     const status = error && error.status ? error.status : 500;
     const isMissingConfig = error && error.code === 'NO_CONFIG';
@@ -467,14 +651,32 @@ function start(options = {}) {
       reject(error);
     });
 
-    server.listen(requested, '127.0.0.1', () => {
+    server.listen(requested, '127.0.0.1', async () => {
       const { port } = server.address();
-      const configured = Boolean(readConfig());
+      const settings = readSettings();
+      await history.load().catch(() => {});
+
+      const where = (provider) => (provider === 'z-ai' ? 'cloud' : 'local');
       console.log('');
       console.log('  ✦ Buddy local server');
       console.log(`    http://127.0.0.1:${port}`);
-      console.log(`    config   ${configPath()}${configured ? '' : '  (not set up yet)'}`);
-      console.log(`    routes   GET /health · POST /setup /chat /tts /asr`);
+      console.log(`    config   ${configDir()}${isConfigured() ? '' : '  (not set up yet)'}`);
+      console.log(
+        `    chat     ${settings.chat.provider} (${where(settings.chat.provider)})` +
+          (settings.chat.provider === 'ollama'
+            ? ` · ${settings.chat.model || providers.OLLAMA_DEFAULT_MODEL} · ${settings.chat.baseUrl}`
+            : '')
+      );
+      console.log(`    voice    ${settings.tts.provider} (${where(settings.tts.provider)})`);
+      console.log(
+        `    hearing  ${settings.asr.provider} (${where(settings.asr.provider)})` +
+          (settings.asr.provider === 'whisper' ? ` · ${settings.asr.baseUrl}` : '')
+      );
+      console.log(
+        `    history  ${settings.saveHistory ? 'saved on this device' : 'not saved'} · ` +
+          `${history.list().length} conversation(s)`
+      );
+      if (providers.isFullyLocal(settings)) console.log('    ✓ fully local — nothing leaves this machine');
       if (!process.env.BUDDY_TOKEN) console.log(`    token    ${AUTH_TOKEN}`);
       console.log('');
       resolve({ port, token: AUTH_TOKEN, server });
@@ -482,7 +684,7 @@ function start(options = {}) {
   });
 }
 
-module.exports = { start, readConfig, configPath, AUTH_TOKEN };
+module.exports = { start, readConfig, readSettings, isConfigured, configPath, AUTH_TOKEN };
 
 // Standalone: `npm run server`.
 if (require.main === module) {

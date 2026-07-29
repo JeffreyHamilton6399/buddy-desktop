@@ -15,9 +15,15 @@ The builds are **unsigned**, so the first launch needs one extra step:
 - **Windows** — SmartScreen → **More info** → **Run anyway**
 - **Linux** — `chmod +x Buddy-*.AppImage`
 
-Buddy asks for your z-ai **base URL** and **API key** once, on first launch, and stores them in its
-own local data folder (`%APPDATA%\buddy\` · `~/Library/Application Support/buddy/` ·
-`~/.config/buddy/`). They're sent only to the AI provider.
+On first launch Buddy asks where it should run:
+
+- **On this machine** — needs [Ollama](https://ollama.com) (`ollama pull llama3.2`). Voice replies use
+  your OS's own voices, with nothing to install. Nothing leaves your device.
+- **z-ai cloud** — asks for a base URL and API key once.
+
+Everything is stored in Buddy's own local data folder (`%APPDATA%\buddy\` ·
+`~/Library/Application Support/buddy/` · `~/.config/buddy/`), including your saved conversations in
+`chats/`. See the [repo README](../README.md#running-buddy-fully-locally) for the full local setup.
 
 ## Run from source
 
@@ -46,7 +52,9 @@ src/
     renderer.js        chat, mic, TTS, ASR, wake word, tiny markdown renderer
     styles.css         warm dark theme
   server/
-    server.js          127.0.0.1 http server: /health /setup /chat /tts /asr
+    server.js          127.0.0.1 http server, routing and auth
+    providers.js       cloud vs local dispatch: ollama, system voices, local whisper
+    history.js         saved conversations, one JSON file per chat
 scripts/
   dev.js               spawns server + electron
   make-icon.js         writes the orb PNG

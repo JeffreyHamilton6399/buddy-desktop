@@ -3,8 +3,15 @@
 A friendly AI companion that lives on your desktop as a small glowing orb. Click it — or say
 **“Hey Buddy”** — and a Siri-style panel opens. Talk or type; Buddy answers out loud.
 
-Buddy runs entirely on your machine and calls the AI provider directly with your own key. There is
-no Buddy server, no proxy, and no account.
+Buddy can run **two ways**, and you pick on first launch:
+
+- **On this machine** — an [Ollama](https://ollama.com) model does the thinking, your OS's own voices
+  do the talking. No key, no account, works with the network unplugged.
+- **z-ai cloud** — bring your own key. Buddy calls the provider directly; there is still no Buddy
+  server, no proxy and no account in between.
+
+You can mix them too: a local model with cloud speech, or the reverse. Either way your conversations
+are **saved on your device** as plain JSON you can browse from the app and delete whenever you like.
 
 ```
 buddy/
@@ -17,29 +24,40 @@ buddy/
 
 ## What “local” actually means
 
-Being straight about this, because the distinction matters:
+Buddy has three separate jobs, and each one can run in either place. This table is the whole privacy
+story — there is nothing else to it:
 
-**Buddy is local-first.** The app, the config and the loopback HTTP server all run on your machine.
-Your API key is stored in Buddy's own data folder and is sent to exactly one place: the AI provider.
-Nothing routes through a server belonging to this project, because there isn't one.
+| Job | Local option | Cloud option | Leaves your device? |
+| --- | --- | --- | --- |
+| **Thinking** (the model) | Ollama on `127.0.0.1` | z-ai | only in cloud mode |
+| **Talking** (text → speech) | your OS's installed voices | z-ai | only in cloud mode |
+| **Hearing** (speech → text) | a local Whisper server, or **off** | z-ai | only in cloud mode |
+| **Your chat history** | always on your disk | — | **never** |
 
-**Buddy is not fully private.** The language model, the text-to-speech and the speech recognition
-all run on the z-ai provider's servers. Your messages and your voice recordings are sent there to be
-processed.
+**In cloud mode, Buddy is local-first but not private.** The app, your key and the loopback server
+all live on your machine, and nothing routes through a server belonging to this project — because
+there isn't one. But your messages and voice recordings do go to z-ai to be processed.
 
-**The wake word uses Option B — VAD plus remote ASR.** Buddy detects speech locally (Web Audio RMS
-against a measured noise floor), then sends a short clip to the provider's ASR to check whether you
-actually said “Hey Buddy.” So **while the wake word is on, brief clips of ambient audio leave your
-device** whenever something is loud enough to look like speech. Two guards keep this reasonable:
+**In local mode, nothing leaves your machine at all** — as long as *hearing* is also local or off.
+Buddy tells you which of these is true, in the setup screen and in the app, rather than making you
+work it out.
 
-- The trigger threshold is calibrated against the room, not hardcoded. Buddy measures the ambient
-  level for the first ~2 seconds and sets the threshold relative to it, then keeps drifting the floor
-  during quiet stretches.
-- Wake checks are rate-limited to at most one every 1.5 seconds, so a noisy room can't spam the API.
+### About the wake word
 
-Turn the wake word off from the tray menu and nothing is captured until you press the mic yourself.
-An on-device engine (Option A) would remove this trade-off entirely — see
-[Upgrading to an on-device wake word](#upgrading-to-an-on-device-wake-word).
+The wake word works by detecting speech locally (Web Audio RMS against a measured noise floor) and
+then transcribing a short clip to check whether you actually said “Hey Buddy.” **Where that clip
+goes depends entirely on your *hearing* setting:**
+
+- **Hearing = local Whisper** → the clip is transcribed on your machine. Ambient audio never leaves
+  your device. This is the genuinely on-device wake word.
+- **Hearing = z-ai** → short clips of ambient sound are sent to z-ai whenever something is loud
+  enough to look like speech. Two guards keep this sane: the threshold is calibrated against your
+  actual room for the first ~2 seconds (never hardcoded) and re-drifts during quiet stretches, and
+  wake checks are rate-limited to one every 1.5 seconds so a noisy room can't spam the API.
+- **Hearing = off** → Buddy never opens your microphone at all. The mic button is disabled and the
+  wake word does not run. Typing works exactly the same.
+
+You can also switch the wake word off from the tray menu at any time, whatever the hearing setting.
 
 ---
 
@@ -66,10 +84,114 @@ and not a sign that anything is wrong.
 Getting rid of these warnings needs an Apple Developer certificate and a Windows code-signing
 certificate; both cost money and neither is set up here.
 
+---
+
+## Running Buddy fully locally
+
+Pick **On this machine** on the first-run screen. Buddy checks what you already have and tells you
+what's missing.
+
+### 1. Thinking — Ollama (one install)
+
+```bash
+# macOS / Linux
+curl -fsSL https://ollama.com/install.sh | sh
+# Windows: download the installer from https://ollama.com
+
+ollama pull llama3.2      # ~2 GB, comfortable on 8 GB of RAM
+```
+
+That's it. Buddy finds Ollama on `http://127.0.0.1:11434` by itself and lists whatever models you've
+pulled. If Ollama isn't running, the setup screen says so and tells you the command to fix it.
+
+Smaller machines: `llama3.2:1b` or `qwen2.5:3b`. Bigger machines: `qwen2.5:7b`, `phi4`.
+
+### 2. Talking — already installed
+
+Buddy uses the voices your operating system ships with, spoken directly in the app. **Nothing to
+install and nothing to configure** — the setup screen lists the voices it found and lets you choose.
+Windows has David/Zira, macOS has the full Speech set, Linux depends on your `speech-dispatcher`
+setup.
+
+### 3. Hearing — optional
+
+This is the only piece that needs real work, so it's **off by default** and Buddy is completely
+usable without it (you type instead of talking). To turn it on, run any OpenAI-compatible
+transcription server and point Buddy at it:
+
+```bash
+# Speaches (formerly faster-whisper-server) — the easiest option
+docker run --rm -p 8000:8000 ghcr.io/speaches-ai/speaches:latest
+```
+
+Then set *Voice input* to **Local Whisper server** with `http://127.0.0.1:8000/v1`. Anything exposing
+`POST /audio/transcriptions` works — Speaches, faster-whisper-server, LocalAI, or `whisper.cpp`'s
+server. Buddy sends the clip as a multipart file with a correct extension, because most of these
+sniff the container from the filename before handing it to ffmpeg.
+
+With hearing local, the mic **and** the wake word run entirely on your machine.
+
+### Changing your mind later
+
+Everything lives in one small file you can edit by hand — `buddy-settings.json` in the data folder
+listed [below](#where-things-are-stored):
+
+```json
+{
+  "chat": { "provider": "ollama", "model": "llama3.2", "baseUrl": "http://127.0.0.1:11434" },
+  "tts":  { "provider": "system", "voice": "Microsoft Zira Desktop" },
+  "asr":  { "provider": "off", "baseUrl": "http://127.0.0.1:8000/v1", "model": "Systran/faster-whisper-small" },
+  "saveHistory": true
+}
+```
+
+`chat.provider` is `ollama` or `z-ai`. `tts.provider` is `system` or `z-ai`. `asr.provider` is
+`whisper`, `z-ai`, or `off`. Restart Buddy after editing, or POST the same shape to `/settings`.
+
+---
+
+## Your chat history
+
+Every conversation is written to your own disk as soon as it happens — one readable JSON file per
+chat, in `chats/` inside Buddy's data folder:
+
+```json
+{
+  "id": "04ed8778-4fee-4faa-a8ce-3509b4f57c66",
+  "title": "are you running locally",
+  "createdAt": "2026-07-29T21:09:12.317Z",
+  "updatedAt": "2026-07-29T21:09:41.882Z",
+  "messages": [
+    { "role": "user", "content": "are you running locally", "at": "2026-07-29T21:09:12.317Z" },
+    { "role": "assistant", "content": "Hey! I'm running entirely on your machine…", "at": "…" }
+  ]
+}
+```
+
+In the app, the **☰ button** in the panel header opens your chats, newest first, with the time and
+message count. Click one to reopen it exactly as it was; hover one to delete it. The **+ button**
+starts a fresh conversation without touching the old one. Reopening Buddy drops you back into your
+most recent chat rather than a blank slate.
+
+Two things worth knowing:
+
+- **Nothing is uploaded, ever.** History is a local file concern only. Even in cloud mode, only the
+  last 20 messages of the *current* conversation are sent as context for a reply — the archive itself
+  is never transmitted.
+- **You are in control of it.** The drawer has a *Save new chats to this device* toggle if you'd
+  rather Buddy forgot as it went, and a *Delete all saved chats* button that removes the files from
+  disk. They're your files, so deleting the folder by hand works just as well.
+
+The files are **not encrypted**. Anyone with access to your user account can read them, the same as
+any other document in your home folder.
+
+---
+
 ### Using Buddy
 
 - **Click the orb** to open the panel. Click the tray/menu-bar icon to toggle it.
 - **Type** and press Enter, or **tap the mic** to record a voice message (tap again to send it).
+- **☰ opens your saved chats**; **+ starts a new one**. Escape closes the drawer.
 - **The speaker button** in the panel header mutes spoken replies.
 - **The tray menu** has *Open Buddy*, a *Wake word: On/Off* checkbox, and *Quit*.
 - An **emerald ring** around the orb means the mic is hot and Buddy is listening for its name.
@@ -135,8 +257,11 @@ a packaged build:
 | macOS | `~/Library/Application Support/buddy/` |
 | Linux | `~/.config/buddy/` |
 
+- `buddy-settings.json` — which provider serves each capability, and whether history is saved.
+- `chats/<id>.json` — one file per conversation. Yours to read, back up or delete.
 - `.z-ai-config` — your `baseUrl` and `apiKey`, written with `0600` where the filesystem supports it.
-  **Stored unencrypted.** It's gitignored, and never logged or returned by any endpoint.
+  **Stored unencrypted.** It's gitignored, and never logged or returned by any endpoint. Only exists
+  if you use a cloud capability.
 - `buddy-state.json` — the orb's position and the wake-word preference.
 
 ---
@@ -151,11 +276,15 @@ a packaged build:
 │  tray icon · manual orb drag · position persistence        │
 │                                                            │
 │  in-process HTTP server → 127.0.0.1:<OS-assigned port>     │
-│    GET /health · POST /setup /chat /tts /asr               │
-└───────────────────────────┬────────────────────────────────┘
-                            │  z-ai-web-dev-sdk (server-side only)
-                            ▼
-                   the z-ai provider's API
+│    /health /settings /providers/status /setup              │
+│    /chat /tts /asr /chats                                  │
+└──────┬──────────────────────┬──────────────────────────────┘
+       │                      │
+       │ chats/*.json         ├── ollama    → 127.0.0.1:11434
+       ▼ (never uploaded)     ├── whisper   → 127.0.0.1:8000
+   your disk                  ├── system voice → the renderer, via the OS
+                              └── z-ai      → the provider's API
+                                             (z-ai-web-dev-sdk, main process only)
 ```
 
 A few decisions worth knowing about:
@@ -238,19 +367,20 @@ deploy workflow with `pages: write` and `id-token: write`.)
 
 ---
 
-## Upgrading to an on-device wake word
+## Going further on the wake word
 
-Swapping Option B for a local engine would make “your audio stays on your device until you speak to
-Buddy” genuinely true, and would be faster and cheaper. The renderer is structured to make this a
+Setting *hearing* to a local Whisper server already makes “your audio stays on your device” true —
+the whole VAD-plus-transcribe loop runs on `127.0.0.1`. What it isn't is *cheap*: every sound loud
+enough to look like speech costs a Whisper inference.
+
+A dedicated keyword-spotting engine would fix that, and the renderer is structured to make it a
 contained change:
 
-1. Add the engine (Porcupine needs a free Picovoice access key; openWakeWord needs a Python
-   sidecar or an ONNX runtime).
+1. Add the engine (Porcupine needs a free Picovoice access key; openWakeWord needs a Python sidecar
+   or an ONNX runtime).
 2. In `src/renderer/renderer.js`, replace `checkClip()` — the function that POSTs a clip to `/asr` —
    with the engine's keyword callback. The RMS loop, cooldown and rate limiter can all go.
 3. Add any native binary to `build.asarUnpack` in `package.json`.
-4. Update the privacy copy in `docs/index.html` and this README, since the trade-off would no longer
-   apply.
 
 ---
 

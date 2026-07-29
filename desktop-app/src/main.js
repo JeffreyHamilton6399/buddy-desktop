@@ -32,8 +32,8 @@ const STATE_FILE = () => path.join(app.getPath('userData'), 'buddy-state.json');
 const ORB_SIZE = 80;
 const PANEL_WIDTH = 420;
 const PANEL_HEIGHT = 620;
-const SETUP_WIDTH = 460;
-const SETUP_HEIGHT = 480;
+const SETUP_WIDTH = 470;
+const SETUP_HEIGHT = 640;
 const DRAG_INTERVAL_MS = 8;
 
 // Handed to the renderer so only Buddy can talk to Buddy's server.
@@ -479,13 +479,13 @@ function stopDrag() {
 // ── ipc ───────────────────────────────────────────────────────────────────
 
 function registerIpc() {
-  const { readConfig } = require('./server/server.js');
+  const { isConfigured } = require('./server/server.js');
 
   ipcMain.handle('buddy:boot', () => ({
     port: serverInfo.port,
     token: serverInfo.token,
     wakeEnabled,
-    configured: Boolean(readConfig()),
+    configured: isConfigured(),
     platform: process.platform,
     transparent: TRANSPARENT,
     panelVisible: Boolean(panelWindow && !panelWindow.isDestroyed() && panelWindow.isVisible()),
@@ -541,10 +541,10 @@ function prepareServerEnv() {
 }
 
 async function startServer() {
-  const { start, readConfig } = require('./server/server.js');
+  const { start, isConfigured } = require('./server/server.js');
   const { port } = await start({ port: 0 });
   serverInfo.port = port;
-  return Boolean(readConfig());
+  return isConfigured();
 }
 
 function fatal(error) {
