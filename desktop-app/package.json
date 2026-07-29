@@ -1,0 +1,77 @@
+{
+  "name": "buddy",
+  "version": "1.0.0",
+  "description": "Buddy — a local-first AI companion that lives on your desktop",
+  "main": "src/main.js",
+  "author": "Buddy",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "server": "node src/server/server.js",
+    "dev": "node scripts/dev.js",
+    "icon": "node scripts/make-icon.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:linux": "electron-builder --linux AppImage deb"
+  },
+  "dependencies": {
+    "z-ai-web-dev-sdk": "^0.0.18"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.buddy.app",
+    "productName": "Buddy",
+    "files": [
+      "src/**/*",
+      "buddy-icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/z-ai-web-dev-sdk/**/*"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "buddy-icon.png",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Buddy listens for 'Hey Buddy' and your voice messages."
+      }
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "buddy-icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "icon": "buddy-icon.png"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "your-github-username",
+      "repo": "buddy"
+    }
+  }
+}

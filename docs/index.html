@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Buddy — your local AI companion</title>
+    <meta
+      name="description"
+      content="Buddy is a friendly AI companion that lives on your desktop as a small glowing orb. Runs on your machine with your own key — no middleman server."
+    />
+    <meta name="theme-color" content="#0b0b0f" />
+    <link rel="icon" href="orb.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <nav class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top">
+          <span class="orb orb-sm" aria-hidden="true"></span>
+          <span>Buddy</span>
+        </a>
+        <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+          <span class="sr-only">Menu</span>
+        </button>
+        <div class="nav-links" id="nav-links">
+          <a href="#features">Features</a>
+          <a href="#download">Download</a>
+          <a class="nav-demo" id="nav-demo" href="#download">Demo</a>
+        </div>
+      </div>
+    </nav>
+
+    <main id="main">
+      <!-- ── hero ──────────────────────────────────────────────────────── -->
+      <header class="hero" id="top">
+        <div class="wrap hero-inner">
+          <div class="hero-copy reveal">
+            <p class="eyebrow">Local-first desktop companion</p>
+            <h1>Meet Buddy.<br /><span class="grad">Your local AI companion.</span></h1>
+            <p class="lede">Say “Hey Buddy”. It just works.</p>
+            <p class="sub">
+              A small glowing orb that sits on top of everything. Click it or call its name, then talk or type —
+              Buddy answers out loud. It runs on your machine and talks straight to the AI with your key.
+              No middleman server.
+            </p>
+            <div class="cta-row">
+              <a class="btn btn-primary" id="hero-download" href="#download">Download Buddy</a>
+              <a class="btn btn-ghost" id="hero-source" href="#download">View source</a>
+            </div>
+            <p class="cta-note" id="hero-platform">macOS · Windows · Linux — free and MIT licensed</p>
+          </div>
+
+          <div class="hero-art reveal" aria-hidden="true">
+            <div class="halo"></div>
+            <div class="orb orb-lg"></div>
+            <div class="mock">
+              <div class="mock-head">
+                <span class="orb orb-xs"></span>
+                <div>
+                  <strong>Buddy</strong>
+                  <em>online</em>
+                </div>
+              </div>
+              <div class="mock-msg them">Hey! I'm Buddy. Ask me anything.</div>
+              <div class="mock-msg me">what's on my calendar today?</div>
+              <div class="mock-msg them">
+                <span class="dots"><i></i><i></i><i></i></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- ── features ──────────────────────────────────────────────────── -->
+      <section class="section" id="features">
+        <div class="wrap">
+          <h2 class="reveal">Small orb, real presence</h2>
+          <p class="section-lede reveal">Four things Buddy is built to do well.</p>
+
+          <ul class="grid">
+            <li class="card reveal">
+              <span class="card-icon" aria-hidden="true">◎</span>
+              <h3>Always one click away</h3>
+              <p>
+                A frameless, always-on-top orb you can drag anywhere. It remembers where you left it and stays
+                out of your taskbar.
+              </p>
+            </li>
+            <li class="card reveal">
+              <span class="card-icon" aria-hidden="true">◍</span>
+              <h3>Talks back to you</h3>
+              <p>
+                Every reply is spoken in a warm voice with a live equaliser, and you can mute it with one tap
+                when you'd rather just read.
+              </p>
+            </li>
+            <li class="card reveal">
+              <span class="card-icon" aria-hidden="true">◌</span>
+              <h3>Hears “Hey Buddy”</h3>
+              <p>
+                Leave the wake word on and Buddy answers to its name — panel open, a quick “Yeah?”, ready to
+                listen. Toggle it off from the tray any time.
+              </p>
+            </li>
+            <li class="card reveal">
+              <span class="card-icon" aria-hidden="true">◈</span>
+              <h3>Your key, your device</h3>
+              <p>
+                No account, no hosted backend, no proxy. Your API key is stored in Buddy's own data folder and
+                used only to call the AI provider directly.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ── how it works ──────────────────────────────────────────────── -->
+      <section class="section alt" id="how">
+        <div class="wrap">
+          <h2 class="reveal">Up and running in a minute</h2>
+          <ol class="steps">
+            <li class="step reveal">
+              <span class="step-num">1</span>
+              <h3>Download</h3>
+              <p>Grab the installer for your OS from the latest release.</p>
+            </li>
+            <li class="step reveal">
+              <span class="step-num">2</span>
+              <h3>Run</h3>
+              <p>Paste your z-ai base URL and API key once. Buddy keeps them on this device.</p>
+            </li>
+            <li class="step reveal">
+              <span class="step-num">3</span>
+              <h3>Say “Hey Buddy”</h3>
+              <p>Or just click the orb. Talk or type — Buddy answers out loud.</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ── privacy ───────────────────────────────────────────────────── -->
+      <section class="section" id="privacy">
+        <div class="wrap narrow">
+          <h2 class="reveal">What “local” means here</h2>
+          <div class="honest reveal">
+            <p>
+              Buddy is <strong>local-first</strong>: it runs entirely on your machine, stores your key in its own
+              local data folder, and calls the AI provider directly. There is no Buddy server, no proxy and no
+              account — nothing of yours passes through us, because there is no “us” in the path.
+            </p>
+            <p>
+              It is <strong>not fully private</strong>, and we won't pretend otherwise. The language model,
+              text-to-speech and speech recognition all run on the z-ai provider's servers, so your messages and
+              voice recordings are sent there to be processed.
+            </p>
+            <p class="honest-flag">
+              <strong>About the wake word:</strong> this build detects speech locally, then sends short audio
+              clips to the AI provider to check whether you said “Hey Buddy”. So while the wake word is on,
+              brief clips of ambient sound leave your device whenever something is loud enough to look like
+              speech. Turn it off from the tray and nothing is captured until you press the mic yourself.
+            </p>
+          </div>
+          <ul class="badges reveal">
+            <li>No hosted backend</li>
+            <li>No account</li>
+            <li>Key stays on your device</li>
+            <li>MIT licensed</li>
+            <li>Wake word can be turned off</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ── download ──────────────────────────────────────────────────── -->
+      <section class="section alt" id="download">
+        <div class="wrap narrow download">
+          <div class="orb orb-lg pulse reveal" aria-hidden="true"></div>
+          <h2 class="reveal">Download Buddy</h2>
+          <p class="section-lede reveal" id="download-line">
+            macOS <code>.dmg</code> · Windows <code>.exe</code> · Linux <code>.AppImage</code>
+          </p>
+          <a class="btn btn-primary btn-lg reveal" id="download-btn" href="#">Download Buddy</a>
+          <p class="cta-note reveal" id="download-hint">Takes you to the latest release on GitHub.</p>
+
+          <div class="note reveal">
+            <h3>First launch</h3>
+            <p>
+              These builds aren't code-signed, so your OS will warn you the first time. That's expected — here's
+              how to get past it:
+            </p>
+            <ul>
+              <li>
+                <strong>macOS:</strong> right-click the app and choose <em>Open</em> (don't double-click). If it
+                says the app is damaged, run
+                <code>xattr -dr com.apple.quarantine /Applications/Buddy.app</code>
+              </li>
+              <li><strong>Windows:</strong> on the SmartScreen prompt, click <em>More info</em> → <em>Run anyway</em>.</li>
+              <li><strong>Linux:</strong> mark the AppImage executable — <code>chmod +x Buddy-*.AppImage</code></li>
+            </ul>
+          </div>
+
+          <div class="note reveal">
+            <h3>What's inside</h3>
+            <ul>
+              <li>The draggable always-on-top orb, with its position remembered between launches</li>
+              <li>A Siri-style chat panel with spoken replies and a mic button</li>
+              <li>“Hey Buddy” wake word, with a tray toggle to switch it off</li>
+              <li>A tray/menu-bar icon: open Buddy, toggle the wake word, quit</li>
+              <li>A loopback-only local server that holds your key and speaks to the provider</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <span class="brand">
+          <span class="orb orb-sm" aria-hidden="true"></span>
+          <span>Buddy</span>
+        </span>
+        <span class="footer-mid">Made with ♥ · © 2026 Buddy</span>
+        <a id="footer-repo" href="#">GitHub</a>
+      </div>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>

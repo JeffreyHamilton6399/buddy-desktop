@@ -1,0 +1,15 @@
+node_modules/
+dist/
+out/
+
+# Never commit a real key.
+.z-ai-config
+
+# The original build spec contains a live GitHub personal access token, so it is
+# deliberately kept out of git history. Revoke that token and the file is safe
+# to commit if you want it tracked.
+buddy-spec.md
+
+*.log
+.DS_Store
+Thumbs.db

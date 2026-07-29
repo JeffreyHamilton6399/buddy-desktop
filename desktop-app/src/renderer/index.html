@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Buddy</title>
+    <!--
+      The Content-Security-Policy for this document is set as a real response
+      header by the buddy:// protocol handler in main.js, because connect-src
+      has to name the server port, which is only assigned at launch.
+    -->
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- ── orb window ─────────────────────────────────────────────────── -->
+    <div class="root" id="root-orb" hidden>
+      <div class="orb-stage">
+        <div class="orb-ring" id="orb-ring" aria-hidden="true"></div>
+        <button class="orb" id="orb" type="button" aria-label="Ask Buddy">
+          <span class="orb-core"></span>
+          <span class="orb-sheen"></span>
+        </button>
+        <span class="orb-dot" id="orb-dot" aria-hidden="true"></span>
+        <div class="orb-tooltip" id="orb-tooltip">Ask Buddy</div>
+        <div class="orb-toast" id="orb-toast" role="status"></div>
+      </div>
+    </div>
+
+    <!-- ── panel window ───────────────────────────────────────────────── -->
+    <div class="root" id="root-panel" hidden>
+      <section class="panel">
+        <header class="panel-head">
+          <span class="mini-orb" aria-hidden="true"></span>
+          <div class="panel-title">
+            <strong>Buddy</strong>
+            <span class="panel-status" id="status">connecting…</span>
+          </div>
+          <div class="panel-actions">
+            <button
+              class="icon-btn"
+              id="speaker"
+              type="button"
+              aria-pressed="true"
+              title="Voice replies: on"
+              aria-label="Toggle voice replies"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 10v4h3l4 3V7L7 10H4z" />
+                <path class="wave wave-1" d="M15.5 9.2a3.6 3.6 0 0 1 0 5.6" />
+                <path class="wave wave-2" d="M17.9 6.8a7 7 0 0 1 0 10.4" />
+              </svg>
+            </button>
+            <button class="icon-btn" id="close-panel" type="button" title="Close" aria-label="Close Buddy">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="messages" id="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+
+        <div class="equalizer" id="equalizer" hidden aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i>
+        </div>
+
+        <form class="composer" id="composer">
+          <input
+            class="composer-input"
+            id="input"
+            type="text"
+            autocomplete="off"
+            placeholder="Ask Buddy anything…"
+            aria-label="Message"
+          />
+          <button class="icon-btn mic" id="mic" type="button" title="Tap to talk, tap again to send" aria-label="Record a voice message">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+            </svg>
+          </button>
+          <button class="send" id="send" type="submit" title="Send" aria-label="Send message">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 12l16-8-6 8 6 8-16-8z" />
+            </svg>
+          </button>
+        </form>
+      </section>
+    </div>
+
+    <!-- ── first-run setup window ─────────────────────────────────────── -->
+    <div class="root" id="root-setup" hidden>
+      <section class="panel setup">
+        <div class="setup-orb" aria-hidden="true"></div>
+        <h1>Hey, I'm Buddy.</h1>
+        <p class="setup-lede">
+          I run on your machine and talk straight to the AI with your own key — no middleman server.
+          Paste your z-ai details once and I'll keep them here on this device.
+        </p>
+
+        <form id="setup-form">
+          <label for="setup-baseurl">API base URL</label>
+          <input
+            id="setup-baseurl"
+            type="url"
+            value="https://api.z.ai/api/paas/v4"
+            spellcheck="false"
+            autocomplete="off"
+            required
+          />
+          <p class="setup-hint">Must be the endpoint that serves <code>/chat/completions</code>, <code>/audio/tts</code> and <code>/audio/asr</code>.</p>
+
+          <label for="setup-key">API key</label>
+          <input id="setup-key" type="password" placeholder="Your z-ai API key" spellcheck="false" autocomplete="off" required />
+
+          <p class="setup-error" id="setup-error" role="alert" hidden></p>
+          <button class="setup-save" id="setup-save" type="submit">Save and start Buddy</button>
+        </form>
+
+        <p class="setup-note">
+          Stored unencrypted in this app's local data folder, and sent only to the AI provider.
+          Your chats, voice clips and wake-word audio go to that provider to be processed.
+        </p>
+      </section>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
