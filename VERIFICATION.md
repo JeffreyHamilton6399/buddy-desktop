@@ -331,21 +331,21 @@ right content types, zero console errors, and the JS-wired links resolve to
 UI, because the token available for pushing had `repo` scope but not `workflow` — GitHub rejects any
 write under `.github/workflows/` from such a token.
 
-**`v1.0.0` is published with installers for all three platforms**, built by that workflow on three
+**`v1.1.0` is the current release** (v1.0.0 remains, key-based). Installers for all three platforms, built by that workflow on three
 runners in parallel:
-<https://github.com/JeffreyHamilton6399/buddy-desktop/releases/tag/v1.0.0>
+<https://github.com/JeffreyHamilton6399/buddy-desktop/releases/tag/v1.1.0>
 
 | Asset | Size |
 | --- | --- |
-| `Buddy-Setup-1.0.0.exe` | 73 MB |
-| `Buddy-1.0.0-arm64.dmg` | 90.7 MB |
-| `Buddy-1.0.0.dmg` | 95.5 MB |
-| `Buddy-1.0.0.AppImage` | 99.8 MB |
-| `buddy_1.0.0_amd64.deb` | 69.6 MB |
+| `Buddy-Setup-1.1.0.exe` | 136 MB |
+| `Buddy-1.1.0-arm64.dmg` | 154 MB |
+| `Buddy-1.1.0.dmg` | 156 MB |
+| `Buddy-1.1.0.AppImage` | 172 MB |
+| `buddy_1.1.0_amd64.deb` | 140 MB |
 
-Verified end to end, unauthenticated: `/releases/latest` returns a 302 to the `v1.0.0` tag (so the
+Verified end to end, unauthenticated: `/releases/latest` returns a 302 to the `v1.1.0` tag (so the
 landing page's download button resolves), every asset returns 200, and range requests return correct
-file magic — `4d5a` (MZ) for the exe, `78da` (zlib) for the dmg, `213c` (`!<arch>`) for the deb.
+file magic — `4d5a` (MZ) for the exe, `78da` (zlib) for the dmg, `213c` (`!<arch>`) for the deb, and `7f45` (ELF) for the AppImage. All five assets on v1.1.0 checked.
 
 ### Two bugs the first release run caught
 
