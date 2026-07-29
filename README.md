@@ -238,6 +238,11 @@ reach loopback, and the token is what keeps these endpoints Buddy's.
 PORT=3005 TOKEN=<token from banner>
 
 curl -s http://127.0.0.1:$PORT/health
+# {"ok":true,"configured":false,"needsModel":true,...}
+
+# How far the built-in model download has got, and start/resume it:
+curl -s -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/model
+curl -s -X POST -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/model
 # {"ok":true,"configured":false}
 
 curl -s -X POST http://127.0.0.1:$PORT/setup \

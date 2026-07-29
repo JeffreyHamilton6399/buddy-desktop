@@ -155,7 +155,7 @@ async function getZai() {
   if (zaiPromise) return zaiPromise;
   zaiPromise = (async () => {
     if (!readConfig()) {
-      throw Object.assign(new Error('Run setup to add your API key'), { code: 'NO_CONFIG' });
+      throw Object.assign(new Error("That cloud provider needs an API key. Buddy's built-in model needs none — see buddy-settings.json"), { code: 'NO_CONFIG' });
     }
     // The SDK is ESM-only; we are CJS, so dynamic import is required.
     const mod = await import('z-ai-web-dev-sdk');
@@ -654,7 +654,7 @@ async function router(req, res) {
   } catch (error) {
     const status = error && error.status ? error.status : 500;
     const isMissingConfig = error && error.code === 'NO_CONFIG';
-    const message = isMissingConfig ? 'Run setup to add your API key' : scrub(error && error.message);
+    const message = isMissingConfig ? "That cloud provider needs an API key. Buddy's built-in model needs none — see buddy-settings.json" : scrub(error && error.message);
     console.error('[buddy]', req.method, pathname, '->', message);
     if (!res.headersSent) {
       sendJson(res, isMissingConfig ? 500 : status, { error: message, needsSetup: Boolean(isMissingConfig) });
