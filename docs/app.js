@@ -5,8 +5,8 @@
 // Set these two to your GitHub owner and repo. Everything on the page that
 // links to GitHub is derived from them.
 // ─────────────────────────────────────────────────────────────────────────────
-const OWNER = 'your-github-username';
-const REPO = 'buddy';
+const OWNER = 'JeffreyHamilton6399';
+const REPO = 'buddy-desktop';
 
 const REPO_URL = `https://github.com/${OWNER}/${REPO}`;
 const RELEASES_LATEST = `${REPO_URL}/releases/latest`;

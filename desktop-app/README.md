@@ -6,7 +6,7 @@ the release process.
 ## Install as a user
 
 Download the installer for your OS from the
-[latest release](https://github.com/your-github-username/buddy/releases/latest) and run it.
+[latest release](https://github.com/JeffreyHamilton6399/buddy-desktop/releases/latest) and run it.
 
 The builds are **unsigned**, so the first launch needs one extra step:
 

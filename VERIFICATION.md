@@ -124,10 +124,10 @@ Loaded `docs/index.html` in a real browser engine and inspected the result:
 | Check | Result |
 | --- | --- |
 | Console errors / failed requests | **none** |
-| Download button href | `https://github.com/your-github-username/buddy/releases/latest` |
+| Download button href | `https://github.com/JeffreyHamilton6399/buddy-desktop/releases/latest` |
 | Hero, nav "Demo" and footer links | all resolve to the repo or `/releases/latest` |
 | OS detection | relabelled the button "Download for Windows" |
-| Feature cards / steps | 4 / 3, as specified |
+| Feature cards / steps | 5 / 3 |
 | Footer pinned to the bottom | yes |
 | Horizontal overflow at 1280px and at 390px | none in either |
 | Mobile nav collapses to a toggle at 390px | yes |

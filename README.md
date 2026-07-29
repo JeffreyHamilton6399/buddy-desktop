@@ -14,7 +14,7 @@ You can mix them too: a local model with cloud speech, or the reverse. Either wa
 are **saved on your device** as plain JSON you can browse from the app and delete whenever you like.
 
 ```
-buddy/
+buddy-desktop/
 ├── desktop-app/                    Electron app (the whole product)
 ├── docs/                           Static landing page for GitHub Pages
 └── .github/workflows/release.yml   Builds + publishes installers on tag push
@@ -64,10 +64,10 @@ You can also switch the wake word off from the tray menu at any time, whatever t
 ## Install as a user
 
 1. Download the installer for your OS from the
-   [latest release](https://github.com/your-github-username/buddy/releases/latest).
+   [latest release](https://github.com/JeffreyHamilton6399/buddy-desktop/releases/latest).
 2. Run it (see [First launch](#first-launch-unsigned-builds) — the builds are unsigned).
-3. On first launch Buddy asks for your z-ai **base URL** and **API key**, once. They're written to
-   Buddy's local data folder and used only to call the provider.
+3. On first launch, choose **On this machine** (a local Ollama model, no key) or **z-ai cloud**
+   (paste a base URL and key once). Either way it is stored only in Buddy's local data folder.
 4. The orb appears in the top-right corner. Drag it wherever you like; it remembers.
 
 ### First launch (unsigned builds)

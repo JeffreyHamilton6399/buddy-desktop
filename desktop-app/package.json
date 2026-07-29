@@ -70,8 +70,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "your-github-username",
-      "repo": "buddy"
+      "owner": "JeffreyHamilton6399",
+      "repo": "buddy-desktop"
     }
   }
 }
