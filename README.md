@@ -17,7 +17,7 @@ are **saved on your device** as plain JSON you can browse from the app and delet
 buddy-desktop/
 ├── desktop-app/                    Electron app (the whole product)
 ├── docs/                           Static landing page for GitHub Pages
-└── .github/workflows/release.yml   Builds + publishes installers on tag push
+└── .github/workflows/release.yml   Builds + publishes installers on tag push (see below)
 ```
 
 ---
@@ -334,13 +334,35 @@ npm run dist:win      # or dist:mac / dist:linux
 Artifacts land in `desktop-app/dist/`. You can only build for the platform you're on, apart from
 Linux targets from Linux — a Windows `.exe` needs Windows (or Wine), and a macOS `.dmg` needs macOS.
 
+### Adding the release workflow
+
+**`.github/workflows/release.yml` is not in this repo yet**, and that is a token-permission problem
+rather than a missing file. It exists locally and is correct; GitHub refuses any write under
+`.github/workflows/` from a token that lacks the **`workflow`** scope, and the token used for the
+initial push only had `repo`. Pick either fix:
+
+**Option A — a token with the right scope (then it is just a commit)**
+
+Create a classic token at *Settings → Developer settings → Personal access tokens* with both **`repo`**
+and **`workflow`** ticked, then:
+
+```bash
+# remove the line that excludes it
+sed -i '/\.github\/workflows\/release\.yml/d' .gitignore
+git add .github/workflows/release.yml .gitignore
+git commit -m "Add the release workflow"
+git push
+```
+
+**Option B — paste it in the web UI (no new token)**
+
+On GitHub: **Actions → New workflow → set up a workflow yourself**, paste the contents of your local
+`.github/workflows/release.yml`, and commit. GitHub allows this because you are authenticating as
+yourself in the browser rather than with a PAT.
+
 ### Via GitHub Actions
 
-Set your owner and repo in **three** places, then push a tag:
-
-1. `desktop-app/package.json` → `build.publish.owner` / `build.publish.repo`
-2. `docs/app.js` → the `OWNER` / `REPO` constants at the top
-3. The release links in this README
+Once the workflow is in place, push a tag:
 
 ```bash
 git tag v1.0.0
