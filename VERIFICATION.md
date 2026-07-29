@@ -79,6 +79,9 @@ Both paths were launched and screenshotted on a real Windows desktop:
   back into a rose-tinted error bubble with the status flipping to `offline`.
 - **Orb position persistence** works — `buddy-state.json` was written with the orb's coordinates and
   restored on the next launch.
+- **Abandoning setup ends the run.** The setup window is frameless, so a dismiss button was added
+  during review — without one, a user who didn't want to continue had only Alt+F4. Clicking it closes
+  the window and the app exits with no orphaned processes.
 - **No renderer console errors, load failures or preload errors** were reported by the diagnostics
   hooks in any run.
 

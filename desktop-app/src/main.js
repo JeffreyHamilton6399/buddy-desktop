@@ -48,6 +48,7 @@ let setupWindow = null;
 let tray = null;
 let wakeEnabled = true;
 let quitting = false;
+let setupCompleted = false;
 let dragTimer = null;
 
 // ── persisted state ───────────────────────────────────────────────────────
@@ -357,7 +358,10 @@ function createSetupWindow() {
   setupWindow.on('closed', () => {
     setupWindow = null;
     // Buddy cannot do anything without a key, so an abandoned setup ends the run.
-    if (!orbWindow) {
+    // `setupCompleted` is what distinguishes that from the window closing
+    // because setup succeeded — do not rely on orbWindow existing yet, since
+    // this event can arrive before the orb has been created.
+    if (!setupCompleted) {
       quitting = true;
       app.quit();
     }
@@ -497,6 +501,7 @@ function registerIpc() {
   });
 
   ipcMain.on('buddy:setup-complete', () => {
+    setupCompleted = true;
     if (setupWindow && !setupWindow.isDestroyed()) {
       const window = setupWindow;
       setupWindow = null; // so the closed handler does not quit the app

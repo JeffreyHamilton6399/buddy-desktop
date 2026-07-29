@@ -703,10 +703,19 @@ body.flat .panel {
 /* ── setup ──────────────────────────────────────────────────────────────── */
 
 .panel.setup {
+  position: relative;
   padding: 22px 24px 18px;
   gap: 0;
   overflow-y: auto;
   -webkit-app-region: drag;
+}
+
+/* The setup window is frameless, so it needs its own way out. */
+.setup-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  -webkit-app-region: no-drag;
 }
 
 .setup-orb {

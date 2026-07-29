@@ -726,6 +726,9 @@ function initSetup() {
     errorBox.hidden = false;
   }
 
+  // Closing setup without a key ends the run — Buddy can't do anything without one.
+  $('setup-close').addEventListener('click', () => window.close());
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     errorBox.hidden = true;
