@@ -14,9 +14,3 @@ buddy-spec.md
 .DS_Store
 Thumbs.db
 
-# Kept out of git only because the token used to push this repo has `repo` scope
-# but not `workflow` scope, and GitHub refuses such a token any write under
-# .github/workflows/. The file is real and correct — see "Adding the release
-# workflow" in README.md. Delete this line once you push with a token that has
-# the `workflow` scope, then commit the file normally.
-.github/workflows/release.yml
