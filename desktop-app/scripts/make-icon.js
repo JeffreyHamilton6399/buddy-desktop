@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generates buddy-icon.png — a 256x256 RGBA orb (amber -> rose -> fuchsia).
+ * Generates buddy-icon.png — a 1024x1024 RGBA orb (amber -> rose -> fuchsia).
  * Dependency-free: writes the PNG chunks by hand using zlib.
  */
 'use strict';
@@ -9,7 +9,9 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
-const SIZE = 256;
+// 1024 so electron-builder can generate macOS .icns, which requires at least
+// 512x512. Windows and Linux accept smaller, macOS does not.
+const SIZE = 1024;
 const OUT = path.join(__dirname, '..', 'buddy-icon.png');
 
 // Warm palette only — no blue, no indigo.
@@ -81,10 +83,11 @@ function buildRaw() {
       } else {
         a = (1 - smoothstep(core, glow, dCenter)) * 0.5;
       }
-      // Feather the very edge of the core so it does not alias.
-      a *= 1 - smoothstep(core - 1.2, core + 1.2, dCenter) * 0;
-      if (dCenter > core - 1 && dCenter <= core) {
-        a = lerp(a, 0.85, smoothstep(core - 1, core, dCenter));
+      // Feather the very edge of the core so it does not alias. Scaled to SIZE
+      // so the softness looks the same at any resolution.
+      const feather = SIZE / 256;
+      if (dCenter > core - feather && dCenter <= core) {
+        a = lerp(a, 0.85, smoothstep(core - feather, core, dCenter));
       }
 
       raw[p++] = Math.round(Math.min(255, Math.max(0, r)));
