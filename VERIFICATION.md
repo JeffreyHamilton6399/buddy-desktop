@@ -254,11 +254,21 @@ known-broken.
 - The Gatekeeper and SmartScreen prompts, and whether the documented workarounds land as written.
   The builds are unsigned by design, so the warnings are expected.
 
-**Needs a configured GitHub repo**
+## Published state
 
-- `.github/workflows/release.yml` has never run. It cannot, until `owner`/`repo` are filled in
-  (three places, listed in the README) and a `v*` tag is pushed.
-- GitHub Pages serving `docs/`. The directory layout is the zero-config one, but Pages has not been
-  switched on.
-- Consequently there is **no published release and no `v1.0.0` tag** — the locally built
-  `Buddy Setup 1.0.0.exe` is the deliverable installer for now.
+The repo is live at **<https://github.com/JeffreyHamilton6399/buddy-desktop>** (public, `main`).
+
+**GitHub Pages is on and serving `docs/`.** Verified against the deployed site, not just locally:
+<https://jeffreyhamilton6399.github.io/buddy-desktop/> returns 200, all four assets resolve with the
+right content types, zero console errors, and the JS-wired links resolve to
+`https://github.com/JeffreyHamilton6399/buddy-desktop/releases/latest` on the real page.
+
+Two things are deliberately still outstanding:
+
+- **`.github/workflows/release.yml` is not in the repo.** The token used to push has `repo` scope but
+  not `workflow`, and GitHub rejects any write under `.github/workflows/` from such a token. The file
+  is correct and present locally, gitignored with a comment pointing at the fix; the README documents
+  both ways to land it. The workflow has therefore **never run**.
+- **There is no release and no `v1.0.0` tag**, so the site's download button currently 404s. The
+  locally built `Buddy Setup 1.0.0.exe` is the deliverable installer until a release is cut — which
+  needs either the workflow above, or a one-command manual upload.
