@@ -37,7 +37,7 @@ npm start
 | `npm start` | Runs the app. Electron starts its own server on an OS-assigned port. |
 | `npm run server` | Runs only the local server and prints its port + auth token. |
 | `npm run dev` | Standalone server on port 3005 **plus** Electron, together. Ctrl+C stops both. |
-| `npm run icon` | Regenerates `buddy-icon.png` (256×256 RGBA, no dependencies). |
+| `npm run icon` | Regenerates `buddy-icon.png` (1024×1024 RGBA, no dependencies). |
 | `npm run dist` | Builds an installer for the current platform, into `dist/`. |
 | `npm run dist:win` / `dist:mac` / `dist:linux` | Builds for one specific platform. |
 
@@ -73,6 +73,10 @@ Useful for development; none are needed in normal use.
 
 ## Notes
 
+- **The icon must be at least 512×512.** electron-builder refuses to generate a macOS `.icns` from
+  anything smaller, and the macOS job is the only one that cares — Windows and Linux build fine from
+  256×256, so a too-small icon fails on exactly one of three runners. `scripts/make-icon.js` emits
+  1024×1024.
 - `.z-ai-config` is **gitignored**. Never commit a real key. `.z-ai-config.example` shows the shape.
 - The z-ai SDK is loaded only in the main process — no key material reaches the renderer.
 - `package-lock.json` is committed on purpose; CI's `npm ci` and npm cache both need it.
