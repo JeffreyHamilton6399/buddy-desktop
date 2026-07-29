@@ -1,10 +1,12 @@
 # Verification report
 
-Everything below was run on the development machine: **Windows 10 Pro (19045), Node 24.15.0,
-Electron 28.3.3**. Where the spec's checklist assumed a Linux host, the equivalent Windows check was
+Everything below was run on the development machine: **Windows 10 Pro (19045), Node 24.15.0**.
+The spec-era checks below ran on Electron 28; everything from v1.1.0 onward ran on Electron 43, which
+the built-in model requires. Where the spec's checklist assumed a Linux host, the equivalent Windows check was
 run instead and is called out as such.
 
-No real z-ai API key was available, so every network check used a **dummy key**. That still proves
+From v1.1.0 the default needs no key at all. The cloud-path checks below still used a **dummy key**,
+because no real one was available. That still proves
 the whole chain end to end — a `401` from the provider means the request was built, authenticated
 locally, routed through the SDK and accepted by the real endpoint. Only the provider's own
 authorisation step fails.
@@ -44,7 +46,7 @@ directory, then exercised with curl:
 | --- | --- | --- |
 | `GET /health` (no config) | `{"ok":true,"configured":false}` | 200 |
 | `POST /chat` **without** a token | `{"error":"Missing or invalid X-Buddy-Token"}` | 401 |
-| `POST /chat` with token, no config | `{"error":"Run setup to add your API key","needsSetup":true}` | 500 |
+| `POST /chat` with token, no config | `{"error":"…needs an API key…","needsSetup":true}` | 500 |
 | `POST /setup` missing `baseUrl` | `{"ok":false,"error":"baseUrl is required …"}` | 400 |
 | `POST /setup` valid | `{"ok":true}` | 200 |
 | `GET /health` (after setup) | `{"ok":true,"configured":true}` | 200 |
