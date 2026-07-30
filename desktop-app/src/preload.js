@@ -22,10 +22,22 @@ contextBridge.exposeInMainWorld('buddy', {
   setWakeEnabled: (enabled) => ipcRenderer.send('buddy:set-wake-enabled', Boolean(enabled)),
   setupComplete: () => ipcRenderer.send('buddy:setup-complete'),
   openExternal: (url) => ipcRenderer.send('buddy:open-external', String(url)),
+  openConfigFolder: () => ipcRenderer.send('buddy:open-config-folder'),
 
   startOrbDrag: () => ipcRenderer.send('buddy:orb-drag-start'),
   endOrbDrag: () => ipcRenderer.send('buddy:orb-drag-end'),
 
+  /**
+   * "Hey Buddy, what time is it" — the orb heard a question along with its name,
+   * so the panel should answer it rather than make the user say it again.
+   */
+  sendWakeQuestion: (text) => ipcRenderer.send('buddy:wake-question', String(text)),
+
+  /** Settings changed somewhere; every window should re-read the runtime. */
+  notifyRuntimeChanged: () => ipcRenderer.send('buddy:runtime-changed'),
+
   onWakeToggled: (handler) => subscribe('buddy:wake-toggled', handler),
   onPanelVisibility: (handler) => subscribe('buddy:panel-visibility', handler),
+  onWakeQuestion: (handler) => subscribe('buddy:wake-question', handler),
+  onRuntimeChanged: (handler) => subscribe('buddy:runtime-changed', handler),
 });

@@ -11,10 +11,14 @@ then works forever, offline, on your own machine.
    install  →  "Getting my brain ready… 43%"  →  chat
 ```
 
-Under the hood: [llama.cpp](https://github.com/ggerganov/llama.cpp) runs **Llama 3.2 1B** inside the
-app, and your operating system's own voices speak the replies. Both are free and neither needs a
-network once the model has landed. Your conversations are **saved on your device** as plain JSON you
-can browse from the app and delete whenever you like.
+Under the hood, three models run inside the app and none of them needs a network once downloaded:
+[llama.cpp](https://github.com/ggerganov/llama.cpp) runs **Llama 3.2 1B** for thinking,
+**Kokoro-82M** speaks the replies in a neural voice, and **Whisper tiny.en** listens for its name and
+for what you say. Your conversations are **saved on your device** as plain JSON you can browse from
+the app and delete whenever you like.
+
+Everything is adjustable from one place: click **Buddy's own name** in the top-left of the panel to
+open settings, where you can pick a bigger brain, choose from 28 voices, or turn listening off.
 
 If you'd rather point Buddy at something stronger, a cloud API and a local
 [Ollama](https://ollama.com) server are both supported — see
@@ -37,14 +41,16 @@ or type leaves it:
 
 | Job | Default (no setup) | Optional alternatives | Leaves your device? |
 | --- | --- | --- | --- |
-| **Thinking** | Llama 3.2 1B, in-process via llama.cpp | Ollama · a cloud API | **no** |
-| **Talking** | your OS's installed voices | a cloud API | **no** |
-| **Hearing** | **off** — the mic is never opened | local Whisper · a cloud API | **no** |
+| **Thinking** | Llama 3.2 1B, in-process via llama.cpp | 3 bigger models · Ollama · a cloud API | **no** |
+| **Talking** | Kokoro-82M, in-process via onnxruntime | your OS's voices · a cloud API | **no** |
+| **Hearing** | Whisper tiny.en, in-process | your own Whisper server · a cloud API · off | **no** |
 | **Your chat history** | plain JSON on your disk | — | **never** |
 
-The one exception is a **single download on first launch**: the ~770 MB model file comes from
-HuggingFace. After that Buddy runs with the network unplugged, and you can verify that by unplugging
-it. Nothing is phoned home, there is no telemetry, and there is no account.
+The one exception is the **downloads on first launch**, all from HuggingFace: ~770 MB for the model,
+then ~156 MB for the voice and ~39 MB for the ears. Only the model is waited for — Buddy opens as
+soon as it can think, and the other two arrive in the background while you type. After that Buddy
+runs with the network unplugged, and you can verify that by unplugging it. Nothing is phoned home,
+there is no telemetry, and there is no account.
 
 **If you switch a job to a cloud API, that job stops being private** — your messages or voice go to
 that provider to be processed. Buddy says which jobs are cloud-backed in the app rather than making
@@ -52,20 +58,32 @@ you work it out, and the startup log prints `✓ fully local` only when none of 
 
 ### About the wake word
 
-The wake word works by detecting speech locally (Web Audio RMS against a measured noise floor) and
-then transcribing a short clip to check whether you actually said “Hey Buddy.” **Where that clip
-goes depends entirely on your *hearing* setting:**
+Say **“Hey Buddy”** and the orb pulses, opens the panel, and answers *“Yeah? What would you like?”*
+Run the two together — “Hey Buddy, what's the capital of Peru” — and it skips the greeting and just
+answers, because the whole sentence was already transcribed.
 
-- **Hearing = local Whisper** → the clip is transcribed on your machine. Ambient audio never leaves
-  your device. This is the genuinely on-device wake word.
+It works by detecting speech locally (Web Audio RMS against a measured noise floor) and then
+transcribing a short clip to check whether you really said the name. **Where that clip goes depends
+entirely on your *hearing* setting:**
+
+- **Hearing = Buddy's own ears** (the default) → the clip is transcribed by Whisper inside the app.
+  Ambient audio never leaves your device.
+- **Hearing = your own Whisper server** → the clip goes to whatever address you configured, on your
+  own network.
 - **Hearing = z-ai** → short clips of ambient sound are sent to z-ai whenever something is loud
   enough to look like speech. Two guards keep this sane: the threshold is calibrated against your
-  actual room for the first ~2 seconds (never hardcoded) and re-drifts during quiet stretches, and
-  wake checks are rate-limited to one every 1.5 seconds so a noisy room can't spam the API.
+  actual room (never hardcoded) and re-drifts during quiet stretches, and wake checks are
+  rate-limited so a noisy room can't spam the API.
 - **Hearing = off** → Buddy never opens your microphone at all. The mic button is disabled and the
   wake word does not run. Typing works exactly the same.
 
-You can also switch the wake word off from the tray menu at any time, whatever the hearing setting.
+Two details worth knowing. Clips include the **third of a second before** speech was detected, kept
+in a rolling buffer — without it the leading “Hey” is already gone by the time the detector fires.
+And Buddy ignores its own voice while it is speaking, so it cannot wake itself up.
+
+You can switch the wake word off from the tray menu or from **Settings → Hearing** at any time. If
+your machine has no microphone, Buddy notices, turns the wake word off, and says so on the orb rather
+than failing quietly.
 
 ---
 
@@ -94,10 +112,26 @@ certificate; both cost money and neither is set up here.
 
 ---
 
+## Settings
+
+Click **Buddy's own name and orb** in the top-left of the panel. Five sections down the side:
+
+| Section | What is in it |
+| --- | --- |
+| **Brain** | Every model Buddy can download itself, with sizes and what each is good for. One tap to switch, one to delete a model you are done with. Any models a running Ollama has pulled appear here too. |
+| **Voice** | Which engine speaks, which of Kokoro's 28 voices, how fast, and a **Hear it** button to audition before committing. |
+| **Hearing** | The “Hey Buddy” switch, which transcriber to use, and **Test the microphone** — it records you and prints back what it heard. |
+| **Chats** | Whether conversations are kept, how many there are, and delete-everything. |
+| **About** | Which engine is doing each job and whether it is local, so the privacy claim is checkable rather than asserted. |
+
+Nothing here needs the file system; the sections below are for people who prefer a text editor.
+
+---
+
 ## Using something other than the built-in model
 
 You do not need any of this. Buddy ships working. But if you want a bigger brain or you already run
-a local model server, every job can be pointed elsewhere.
+a local model server, every job can be pointed elsewhere — from **Settings → Brain**, or by hand.
 
 Everything lives in one small file you can edit by hand — `buddy-settings.json` in the data folder
 listed [below](#where-things-are-stored). Restart Buddy after editing, or POST the same shape to
@@ -105,9 +139,10 @@ listed [below](#where-things-are-stored). Restart Buddy after editing, or POST t
 
 ```json
 {
-  "chat": { "provider": "builtin", "model": "", "baseUrl": "http://127.0.0.1:11434" },
-  "tts":  { "provider": "system", "voice": "Microsoft Zira Desktop" },
-  "asr":  { "provider": "off", "baseUrl": "http://127.0.0.1:8000/v1", "model": "Systran/faster-whisper-small" },
+  "version": 2,
+  "chat": { "provider": "builtin", "builtinModel": "", "model": "", "baseUrl": "http://127.0.0.1:11434" },
+  "tts":  { "provider": "kokoro", "voice": "af_heart", "speed": 1 },
+  "asr":  { "provider": "local", "baseUrl": "http://127.0.0.1:8000/v1", "model": "Systran/faster-whisper-small" },
   "saveHistory": true
 }
 ```
@@ -115,8 +150,19 @@ listed [below](#where-things-are-stored). Restart Buddy after editing, or POST t
 | Job | Setting | Values |
 | --- | --- | --- |
 | Thinking | `chat.provider` | `builtin` (default) · `ollama` · `z-ai` |
-| Talking | `tts.provider` | `system` (default) · `z-ai` |
-| Hearing | `asr.provider` | `off` (default) · `whisper` · `z-ai` |
+| Which built-in | `chat.builtinModel` | `llama-3.2-1b-instruct-q4_k_m` (default) · `llama-3.2-3b-instruct-q4_k_m` · `qwen2.5-3b-instruct-q4_k_m` · `qwen2.5-7b-instruct-q4_k_m` |
+| Talking | `tts.provider` | `kokoro` (default) · `system` · `z-ai` |
+| Hearing | `asr.provider` | `local` (default) · `whisper` · `z-ai` · `off` |
+
+Upgrading from 1.1.0 moves you onto the new voice and ears automatically, unless you had deliberately
+chosen the cloud or your own Whisper server — those choices are left alone.
+
+### A bigger built-in model
+
+**Settings → Brain** lists four, from the 770 MB default up to Qwen 2.5 7B. Each shows its download
+size and roughly how much memory it wants, because that is the part that decides whether a model is
+pleasant on a given laptop. Buddy verifies each download against a known SHA-256 and will not load a
+file that fails.
 
 ### A bigger model via Ollama
 
@@ -125,9 +171,10 @@ curl -fsSL https://ollama.com/install.sh | sh   # Windows: installer from ollama
 ollama pull qwen2.5:7b
 ```
 
-Then set `chat.provider` to `ollama` and `chat.model` to `qwen2.5:7b`. Buddy finds Ollama on
-`http://127.0.0.1:11434` by itself. This stays entirely local — it is just a larger model than the
-one Buddy carries.
+Buddy probes `http://127.0.0.1:11434` on its own; anything you have pulled shows up under
+**Settings → Brain** with a button to use it. This stays entirely local — it is just a larger model
+than the one Buddy carries. If Ollama is not running, the section says so instead of showing an empty
+list.
 
 ### A cloud API
 
@@ -135,29 +182,31 @@ The first-run screen has a *"Use a cloud API instead"* link if you want to skip 
 altogether. Or set `chat.provider` to `z-ai` and put a `baseUrl` and `apiKey` in `.z-ai-config`.
 **This is the only configuration that sends your conversations off the machine.**
 
-### Voice input — turning the microphone on
+### Your own transcription server
 
-Off by default, because it is the one piece that needs real setup and Buddy is completely usable by
-typing. To enable it, run any OpenAI-compatible transcription server and point Buddy at it:
+If you would rather run Whisper yourself than use the copy inside Buddy, set `asr.provider` to
+`whisper`:
 
 ```bash
 # Speaches (formerly faster-whisper-server) — the easiest option
 docker run --rm -p 8000:8000 ghcr.io/speaches-ai/speaches:latest
 ```
 
-Then set `asr.provider` to `whisper` with `baseUrl` `http://127.0.0.1:8000/v1`. Anything exposing
-`POST /audio/transcriptions` works — Speaches, faster-whisper-server, LocalAI, or `whisper.cpp`'s
-server. Buddy sends the clip as a multipart file with a correct extension, because most of these
-sniff the container from the filename before handing it to ffmpeg.
+Anything exposing `POST /audio/transcriptions` works — Speaches, faster-whisper-server, LocalAI, or
+`whisper.cpp`'s server. Buddy records raw 16 kHz samples and puts a wav header on them for these
+providers, so there is no codec to agree on.
 
-With hearing local, the mic **and** the wake word run entirely on your machine.
+### Where the models live, and how to reclaim the space
 
-### Where the model lives, and how to reclaim the space
+Inside the data folder:
 
-`models/Llama-3.2-1B-Instruct-Q4_K_M.gguf` (~770 MB) inside the data folder. Delete it and Buddy
-offers to download it again on next launch; point `chat.provider` at something else first if you
-don't want it back. The download resumes if interrupted and is checked against a known SHA-256
-before use, so a half-finished file can never be loaded as a model.
+- `models/*.gguf` — the brain, ~770 MB for the default. **Settings → Brain** has a Delete button for
+  any model that is not currently answering; you cannot delete the last one out from under yourself.
+- `models/hf/` — the voice (~156 MB) and the ears (~39 MB).
+
+Delete any of them and Buddy offers to fetch them again. Downloads resume if interrupted, and the
+GGUF is checked against a known SHA-256 before use, so a half-finished file can never be loaded as a
+model.
 
 ## Your chat history
 
@@ -198,13 +247,28 @@ any other document in your home folder.
 
 ### Using Buddy
 
-- **Click the orb** to open the panel. Click the tray/menu-bar icon to toggle it.
+- **Click the orb** to open the panel, or **drag it** anywhere; it remembers where you left it.
+  Click the tray/menu-bar icon to toggle the panel.
+- **Say “Hey Buddy”** to open it hands-free. Ask in the same breath to skip the greeting.
+- **Click Buddy's name** in the top-left for settings.
 - **Type** and press Enter, or **tap the mic** to record a voice message (tap again to send it).
-- **☰ opens your saved chats**; **+ starts a new one**. Escape closes the drawer.
+- **☰ opens your saved chats**; **+ starts a new one**. Escape closes whatever is over the chat.
 - **The speaker button** in the panel header mutes spoken replies.
 - **The tray menu** has *Open Buddy*, a *Wake word: On/Off* checkbox, and *Quit*.
-- An **emerald ring** around the orb means the mic is hot and Buddy is listening for its name.
-  The wake word pauses automatically while the panel is open.
+
+What the orb is telling you:
+
+| Orb | Meaning |
+| --- | --- |
+| Slow breathing glow | Idle |
+| Emerald ring and dot, gentle ripple | Mic is hot, listening for its name |
+| Amber ring, quick ripple, swelling with your voice | It can hear you talking right now |
+| One bright pulse | It heard its name |
+| Faster pulsing | It is speaking |
+| A shake | Something went wrong — the toast underneath says what |
+
+The wake word pauses automatically while the panel is open, and Buddy ignores its own voice so it
+cannot wake itself.
 
 ---
 
@@ -258,7 +322,32 @@ curl -s -X POST http://127.0.0.1:$PORT/chat \
 curl -s -X POST http://127.0.0.1:$PORT/tts \
   -H 'Content-Type: application/json' -H "X-Buddy-Token: $TOKEN" \
   -d '{"text":"Hello there"}' --output hello.wav
+
+# The whole model catalogue, plus whatever Ollama is offering:
+curl -s -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/models
+
+# Download one, or give its disk space back:
+curl -s -X POST   -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/models/qwen2.5-3b-instruct-q4_k_m
+curl -s -X DELETE -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/models/qwen2.5-3b-instruct-q4_k_m
+
+# The voice and the ears: how far their downloads got, and start them.
+curl -s -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/speech
+curl -s -X POST -H "X-Buddy-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"what":"both"}' http://127.0.0.1:$PORT/speech
+
+# The 28 voices Buddy can speak with:
+curl -s -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/voices
+
+# How a reply gets split for speaking, one chunk at a time:
+curl -s -X POST http://127.0.0.1:$PORT/tts/plan \
+  -H 'Content-Type: application/json' -H "X-Buddy-Token: $TOKEN" \
+  -d '{"text":"**Sure!** Two things:\n- one\n- two"}'
+# {"chunks":["Sure! Two things: one.","two."]}
 ```
+
+`/asr` takes raw 16 kHz mono float samples as base64 in `pcm`, not an encoded file — that is what
+Whisper wants, and it means no audio codec is involved anywhere. When a provider needs a file, the
+server adds a wav header itself.
 
 ### Where things are stored
 
@@ -272,7 +361,8 @@ a packaged build:
 | Linux | `~/.config/buddy/` |
 
 - `buddy-settings.json` — which provider serves each capability, and whether history is saved.
-- `models/*.gguf` — the built-in language model (~770 MB). Delete it to reclaim the space.
+- `models/*.gguf` — the built-in language models (~770 MB each). Delete to reclaim the space.
+- `models/hf/` — the voice (~156 MB) and the ears (~39 MB), as ONNX weights.
 - `chats/<id>.json` — one file per conversation. Yours to read, back up or delete.
 - `.z-ai-config` — your `baseUrl` and `apiKey`, written with `0600` where the filesystem supports it.
   **Stored unencrypted.** It's gitignored, and never logged or returned by any endpoint. Only exists
@@ -285,22 +375,25 @@ a packaged build:
 
 ```
 ┌─ Electron main ────────────────────────────────────────────┐
-│  orb window (80×80, frameless, transparent, on top)        │
+│  orb window (128×128, frameless, transparent, on top)      │
 │  panel window (420×620, hidden not destroyed)              │
 │  setup window (first run only)                             │
 │  tray icon · manual orb drag · position persistence        │
 │                                                            │
 │  in-process HTTP server → 127.0.0.1:<OS-assigned port>     │
 │    /health /settings /providers/status /setup              │
-│    /chat /tts /asr /chats                                  │
+│    /model /models /speech /voices                          │
+│    /chat /tts /tts/plan /asr /chats                        │
 └──────┬──────────────────────┬──────────────────────────────┘
        │                      │
-       │ chats/*.json         ├── builtin   → llama.cpp, in this process  ← default
-       ▼ (never uploaded)     ├── system voice → the renderer, via the OS  ← default
-   your disk                  ├── ollama    → 127.0.0.1:11434
-                              ├── whisper   → 127.0.0.1:8000
-                              └── z-ai      → the provider's API
-                                             (z-ai-web-dev-sdk, main process only)
+       │ chats/*.json         ├── builtin  → llama.cpp, in this process   ← default
+       ▼ (never uploaded)     ├── kokoro   → onnxruntime, in this process ← default
+   your disk                  ├── local    → Whisper, in this process     ← default
+                              ├── system voice → the renderer, via the OS
+                              ├── ollama   → 127.0.0.1:11434
+                              ├── whisper  → 127.0.0.1:8000
+                              └── z-ai     → the provider's API
+                                            (z-ai-web-dev-sdk, main process only)
 ```
 
 A few decisions worth knowing about:
@@ -315,6 +408,20 @@ A few decisions worth knowing about:
 - **The orb is dragged manually.** `-webkit-app-region: drag` swallows hover and click on a target
   this small, so main watches the cursor and calls `setPosition` itself. A press that moves under 5px
   in under 450ms counts as a click.
+- **The orb window is twice the orb.** A transparent window cannot paint outside itself, so a window
+  sized to the circle clipped the glow into a square. Everything the orb draws — including blur radii
+  and the largest frame of every animation — is sized to fit inside 128px, and `ORB_WINDOW` in
+  `main.js` and `.orb-stage` in `styles.css` are two halves of one contract.
+- **Speech is generated a sentence at a time.** Kokoro runs at under 2× realtime on a CPU, so
+  synthesizing a whole reply first would leave seconds of silence after the text appeared. `/tts/plan`
+  splits the reply, deliberately making the first chunk shortest, and the renderer plays each chunk
+  while fetching the next.
+- **The microphone is captured as raw 16 kHz float via an AudioWorklet**, never MediaRecorder. That is
+  Whisper's native input, so no Opus decoder is needed in the server. A rolling buffer keeps the last
+  1.5 seconds so a clip can begin *before* speech was detected — otherwise the leading “Hey” is
+  already gone.
+- **Both audio models run in the main process**, alongside llama.cpp. One copy each, no matter how
+  many windows are open, and the strict CSP in the renderer stays untouched.
 - **The SDK is only ever loaded in the main process.** No key material reaches the renderer.
 
 ### The z-ai SDK: what's actually there
@@ -407,18 +514,23 @@ deploy workflow with `pages: write` and `id-token: write`.)
 
 ## Going further on the wake word
 
-Setting *hearing* to a local Whisper server already makes “your audio stays on your device” true —
-the whole VAD-plus-transcribe loop runs on `127.0.0.1`. What it isn't is *cheap*: every sound loud
-enough to look like speech costs a Whisper inference.
+“Your audio stays on your device” is now true by default — the whole VAD-plus-transcribe loop runs
+inside the app. What it isn't is *cheap*: every sound loud enough to look like speech costs a Whisper
+inference (~0.5s of CPU for a short clip).
 
 A dedicated keyword-spotting engine would fix that, and the renderer is structured to make it a
 contained change:
 
-1. Add the engine (Porcupine needs a free Picovoice access key; openWakeWord needs a Python sidecar
-   or an ONNX runtime).
-2. In `src/renderer/renderer.js`, replace `checkClip()` — the function that POSTs a clip to `/asr` —
-   with the engine's keyword callback. The RMS loop, cooldown and rate limiter can all go.
+1. Add the engine (Porcupine needs a free Picovoice access key; openWakeWord is ONNX, and
+   `onnxruntime-node` is already a dependency).
+2. In `src/renderer/orb.js`, replace `considerClip()` — the function that POSTs a clip to `/asr` —
+   with the engine's keyword callback. The cooldown and rate limiter can go; the detector in
+   `capture.js` and its ring buffer are still what you want feeding it.
 3. Add any native binary to `build.asarUnpack` in `package.json`.
+
+The transcribe-to-check approach does buy one thing a keyword spotter would not: because the clip is
+fully transcribed anyway, “Hey Buddy, what's the capital of Peru” arrives as one sentence and can be
+answered without a second round of listening.
 
 ---
 
@@ -436,10 +548,32 @@ separate daemon — the model is loaded straight into the Electron main process.
   stays warm, and is released after 30 minutes idle.
 - **Requests are serialised.** One llama.cpp context cannot serve two conversations at once.
 
+## The voice and the ears
+
+Both are ONNX models run through `onnxruntime-node` by
+[transformers.js](https://github.com/huggingface/transformers.js), in the same process as llama.cpp.
+
+- **Kokoro-82M, fp16.** The smaller q8 weights are half the size but synthesize at *0.9× realtime* on
+  this CPU — slower than the speech plays, so Buddy would fall further behind the longer it talked.
+  fp16 manages ~1.8× for 156 MB. Measurements are in [VERIFICATION.md](VERIFICATION.md).
+- **Whisper tiny.en, q8.** 39 MB against base.en's 73 MB, roughly twice as fast, and it got the same
+  words right on every phrase tried. Wake-word checks run constantly, so the fast one is also the
+  kind one.
+- **DirectML does not work for Kokoro** — it fails on a `ConvTranspose` node — so both run on CPU.
+- **Whisper invents captions for silence.** Given nothing, it returns `(wind blowing)` or, reliably
+  here, `you`. Anything that is only a bracketed sound effect or a known stock phrase is discarded,
+  or an always-listening orb would answer questions nobody asked.
+- **Each is released after 10 minutes idle**, since together they hold about 300 MB.
+
 ## Verification status
 
 See [`VERIFICATION.md`](VERIFICATION.md) for exactly what was tested, what passed, and what still
 needs a real desktop, a live microphone or a signed build.
+
+The headline gap in **v1.2.0**: the wake word has never been triggered by an actual voice, because the
+development machine has no working microphone. Everything downstream of audio capture is verified —
+including Whisper on real speech and the phrase matcher — but `AudioWorklet → voice detection → clip`
+has not been exercised end to end.
 
 ## License
 

@@ -10,12 +10,19 @@
  *   GET    /settings            current provider choices (never any secret)
  *   POST   /settings            change provider choices
  *   GET    /providers/status    probe the local stack: is Ollama up, which models
- *   GET    /model               how far the built-in model download has got
+ *   GET    /model               how far the active chat model's download has got
  *   POST   /model               start or resume that download
+ *   GET    /models              the whole catalog, plus any models Ollama offers
+ *   POST   /models/:id          download one catalogue model
+ *   DELETE /models/:id          give its disk space back
+ *   GET    /speech              how far the voice and hearing downloads have got
+ *   POST   /speech              start or resume those downloads
+ *   GET    /voices              the voices Buddy can speak with
  *   POST   /setup               store the z-ai baseUrl + key
  *   POST   /chat                send a message, get a reply
+ *   POST   /tts/plan            split a reply into speakable chunks
  *   POST   /tts                 speak text (audio bytes, or a hand-off to the OS voice)
- *   POST   /asr                 transcribe an audio clip
+ *   POST   /asr                 transcribe a clip of 16 kHz float samples
  *   GET    /chats               list saved conversations
  *   GET    /chats/:id           read one conversation
  *   PATCH  /chats/:id           rename one conversation
@@ -33,6 +40,9 @@ const crypto = require('crypto');
 const providers = require('./providers.js');
 const builtin = require('./builtin.js');
 const modelStore = require('./model.js');
+const voice = require('./voice.js');
+const hearing = require('./hearing.js');
+const audio = require('./audio.js');
 const { History } = require('./history.js');
 
 // ── SDK facts, verified against z-ai-web-dev-sdk@0.0.18 ────────────────────
@@ -105,11 +115,17 @@ let settingsCache = null;
 function readSettings() {
   if (settingsCache) return settingsCache;
   try {
-    settingsCache = providers.normaliseSettings(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')));
+    const onDisk = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+    settingsCache = providers.normaliseSettings(providers.migrateSettings(onDisk));
   } catch {
     settingsCache = providers.normaliseSettings(null);
   }
   return settingsCache;
+}
+
+/** Which catalogue model the built-in brain should be using. */
+function activeModelId(settings) {
+  return modelStore.resolveId((settings || readSettings()).chat.builtinModel);
 }
 
 function settingsFileExists() {
@@ -137,8 +153,9 @@ async function writeSettings(patch) {
 function isConfigured() {
   const settings = readSettings();
   // The built-in model is the default, so a brand new install is "configured"
-  // exactly when its model has finished downloading.
-  if (providers.usesBuiltinModel(settings) && !modelStore.isReady(configDir())) return false;
+  // exactly when its model has finished downloading. The voice and the ears are
+  // deliberately not part of this: Buddy is usable by typing while they arrive.
+  if (providers.usesBuiltinModel(settings) && !modelStore.isReady(configDir(), activeModelId(settings))) return false;
   if (providers.cloudCapabilities(settings).length === 0) return true;
   return Boolean(readConfig());
 }
@@ -329,6 +346,10 @@ function scrub(message) {
 
 function describeRuntime() {
   const settings = readSettings();
+  const modelId = activeModelId(settings);
+  const voiceReady = voice.isReady(configDir());
+  const hearingReady = hearing.isReady(configDir());
+
   return {
     ok: true,
     configured: isConfigured(),
@@ -341,11 +362,21 @@ function describeRuntime() {
     },
     chatModel:
       settings.chat.provider === 'builtin'
-        ? modelStore.MODEL.label
+        ? modelStore.get(modelId).label
         : settings.chat.model || providers.OLLAMA_DEFAULT_MODEL,
-    model: modelStore.snapshot(configDir()),
-    needsModel: providers.usesBuiltinModel(settings) && !modelStore.isReady(configDir()),
-    ttsVoice: settings.tts.voice,
+    model: modelStore.snapshot(configDir(), modelId),
+    needsModel: providers.usesBuiltinModel(settings) && !modelStore.isReady(configDir(), modelId),
+    ttsVoice: settings.tts.voice || voice.DEFAULT_VOICE,
+    ttsSpeed: settings.tts.speed,
+    asrBaseUrl: settings.asr.baseUrl,
+    greeting: voice.GREETING,
+    // Whether each capability can actually run right now, which is what decides
+    // if the UI offers a microphone and whether the orb may listen at all.
+    voiceReady: settings.tts.provider === 'kokoro' ? voiceReady : true,
+    hearingReady: settings.asr.provider === 'local' ? hearingReady : settings.asr.provider !== 'off',
+    speech: { voice: voice.snapshot(), hearing: hearing.snapshot() },
+    needsSpeech:
+      (providers.usesLocalVoice(settings) && !voiceReady) || (providers.usesLocalHearing(settings) && !hearingReady),
     cloud: providers.cloudCapabilities(settings),
     fullyLocal: providers.isFullyLocal(settings),
     saveHistory: settings.saveHistory,
@@ -377,17 +408,30 @@ async function handleGetSettings(_req, res) {
 }
 
 async function handlePostSettings(req, res) {
+  const before = readSettings();
+  const beforeModelId = activeModelId(before);
+
   const body = await readBody(req);
   const settings = await writeSettings(body && typeof body === 'object' ? body : {});
+
+  // A different brain means the loaded one is now the wrong one. Dropping it here
+  // rather than on the next message keeps the memory honest and makes the switch
+  // visible: the following reply is slow because it is loading what you chose.
+  if (activeModelId(settings) !== beforeModelId || settings.chat.provider !== before.chat.provider) {
+    await builtin.unload().catch(() => {});
+  }
+  if (before.tts.provider === 'kokoro' && settings.tts.provider !== 'kokoro') voice.unload();
+  if (before.asr.provider === 'local' && settings.asr.provider !== 'local') await hearing.unload();
+
   console.log(
     `[buddy] providers → chat:${settings.chat.provider} tts:${settings.tts.provider} asr:${settings.asr.provider}`
   );
   return sendJson(res, 200, { ok: true, settings, runtime: describeRuntime() });
 }
 
-/** Where the built-in model download has got to. Polled by the ready screen. */
+/** Where the active model's download has got to. Polled by the ready screen. */
 async function handleModelState(_req, res) {
-  return sendJson(res, 200, modelStore.snapshot(configDir()));
+  return sendJson(res, 200, modelStore.snapshot(configDir(), activeModelId()));
 }
 
 /**
@@ -395,13 +439,129 @@ async function handleModelState(_req, res) {
  * the caller polls GET /model rather than holding a request open for 770 MB.
  */
 async function handleModelDownload(_req, res) {
-  if (modelStore.isReady(configDir())) return sendJson(res, 200, modelStore.snapshot(configDir()));
-  if (!modelStore.isDownloading()) {
-    modelStore.ensureModel(configDir()).catch(() => {
+  const id = activeModelId();
+  if (modelStore.isReady(configDir(), id)) return sendJson(res, 200, modelStore.snapshot(configDir(), id));
+  if (!modelStore.isDownloading(id)) {
+    modelStore.ensureModel(configDir(), id).catch(() => {
       /* the error is already on the snapshot the client polls */
     });
   }
-  return sendJson(res, 202, modelStore.snapshot(configDir()));
+  return sendJson(res, 202, modelStore.snapshot(configDir(), id));
+}
+
+/**
+ * The whole picker in one response: every model Buddy can download itself, plus
+ * whatever an Ollama on this machine is offering. Ollama is probed rather than
+ * assumed, so the picker can say "not running" instead of listing nothing.
+ */
+async function handleListModels(_req, res) {
+  const settings = readSettings();
+  const catalog = modelStore.catalogSnapshot(configDir(), activeModelId(settings));
+  const installed = await providers.listOllamaModels(settings.chat.baseUrl);
+
+  return sendJson(res, 200, {
+    ...catalog,
+    provider: settings.chat.provider,
+    ollama: {
+      baseUrl: settings.chat.baseUrl,
+      reachable: installed !== null,
+      models: installed || [],
+      active: settings.chat.provider === 'ollama' ? settings.chat.model || providers.OLLAMA_DEFAULT_MODEL : null,
+    },
+  });
+}
+
+async function handleDownloadModel(_req, res, [id]) {
+  const resolved = modelStore.resolveId(id);
+  if (resolved !== id) return sendJson(res, 404, { error: `No model called ${id}` });
+
+  if (modelStore.isReady(configDir(), id)) return sendJson(res, 200, modelStore.snapshot(configDir(), id));
+  if (!modelStore.isDownloading(id)) {
+    modelStore.ensureModel(configDir(), id).catch(() => {
+      /* the error is already on the snapshot the client polls */
+    });
+  }
+  return sendJson(res, 202, modelStore.snapshot(configDir(), id));
+}
+
+async function handleRemoveModel(_req, res, [id]) {
+  const resolved = modelStore.resolveId(id);
+  if (resolved !== id) return sendJson(res, 404, { error: `No model called ${id}` });
+  if (modelStore.isDownloading(id)) {
+    return sendJson(res, 409, { error: 'That model is still downloading.' });
+  }
+
+  const settings = readSettings();
+  // Deleting the model that is currently answering would leave Buddy mute with
+  // no explanation, so the choice has to move somewhere that still exists.
+  if (providers.usesBuiltinModel(settings) && activeModelId(settings) === id) {
+    const fallback = modelStore.CATALOG.find(
+      (entry) => entry.id !== id && modelStore.isReady(configDir(), entry.id)
+    );
+    if (!fallback) {
+      return sendJson(res, 409, {
+        error: 'That is the only model Buddy has to think with. Download another one first.',
+      });
+    }
+    await writeSettings({ chat: { builtinModel: fallback.id } });
+    await builtin.unload();
+  }
+
+  await modelStore.removeModel(configDir(), id);
+  console.log(`[buddy] removed model ${id}`);
+  return sendJson(res, 200, { ok: true, ...modelStore.catalogSnapshot(configDir(), activeModelId()) });
+}
+
+// ── voice and hearing assets ──────────────────────────────────────────────
+
+async function handleSpeechState(_req, res) {
+  return sendJson(res, 200, {
+    voice: { ...voice.snapshot(), ready: voice.isReady(configDir()), loaded: voice.isLoaded() },
+    hearing: { ...hearing.snapshot(), ready: hearing.isReady(configDir()), loaded: hearing.isLoaded() },
+  });
+}
+
+/**
+ * Pull down the voice and the ears. Both are loaded rather than merely fetched,
+ * because transformers.js has no separate "download" step — asking for the model
+ * is what downloads it, and having it warm is what we wanted anyway.
+ */
+async function handleSpeechDownload(req, res) {
+  const body = await readBody(req);
+  const want = typeof body.what === 'string' ? body.what : 'both';
+  const settings = readSettings();
+
+  if (want === 'voice' || want === 'both') {
+    voice.warmUp(configDir(), { greetingVoice: settings.tts.voice || undefined }).catch(() => {
+      /* the error is already on the snapshot the client polls */
+    });
+  }
+  if (want === 'hearing' || want === 'both') {
+    hearing.warmUp(configDir()).catch(() => {
+      /* as above */
+    });
+  }
+  return sendJson(res, 202, {
+    voice: { ...voice.snapshot(), ready: voice.isReady(configDir()) },
+    hearing: { ...hearing.snapshot(), ready: hearing.isReady(configDir()) },
+  });
+}
+
+/** The voice picker's options. Needs the model on disk, so it may take a moment. */
+async function handleListVoices(_req, res) {
+  const settings = readSettings();
+  if (settings.tts.provider !== 'kokoro') {
+    // The OS voices are only enumerable in the renderer, and z-ai's are fixed.
+    return sendJson(res, 200, { provider: settings.tts.provider, voices: [], selected: settings.tts.voice });
+  }
+  if (!voice.isReady(configDir())) {
+    return sendJson(res, 200, { provider: 'kokoro', voices: [], selected: settings.tts.voice, needsDownload: true });
+  }
+  return sendJson(res, 200, {
+    provider: 'kokoro',
+    voices: await voice.listVoices(configDir()),
+    selected: settings.tts.voice || voice.DEFAULT_VOICE,
+  });
 }
 
 async function handleProviderStatus(_req, res) {
@@ -432,15 +592,16 @@ async function handleChat(req, res) {
 
   let completion;
   if (settings.chat.provider === 'builtin') {
-    if (!modelStore.isReady(configDir())) {
+    const modelId = activeModelId(settings);
+    if (!modelStore.isReady(configDir(), modelId)) {
       return sendJson(res, 503, {
         error: "Buddy's model is still downloading.",
         needsModel: true,
-        model: modelStore.snapshot(configDir()),
+        model: modelStore.snapshot(configDir(), modelId),
       });
     }
     completion = await builtin.chat({
-      modelPath: modelStore.modelPath(configDir()),
+      modelPath: modelStore.modelPath(configDir(), modelId),
       messages,
     });
   } else if (settings.chat.provider === 'ollama') {
@@ -468,6 +629,25 @@ async function handleChat(req, res) {
   });
 }
 
+/**
+ * Split a reply into the pieces Buddy will say one at a time. The renderer plays
+ * each chunk while the next is still being synthesized, so speech starts about
+ * half a second after a reply lands instead of after the whole thing is made.
+ */
+async function handleTtsPlan(req, res) {
+  const body = await readBody(req);
+  const raw = typeof body.text === 'string' ? body.text : '';
+  if (!raw.trim()) return sendJson(res, 400, { error: 'text is required' });
+
+  const settings = readSettings();
+  // Only the local voice is generated a chunk at a time; the others are one call.
+  if (settings.tts.provider !== 'kokoro') {
+    const spoken = voice.speakableText(raw).slice(0, MAX_TTS_CHARS);
+    return sendJson(res, 200, { chunks: spoken ? [spoken] : [] });
+  }
+  return sendJson(res, 200, { chunks: voice.chunkForSpeech(raw) });
+}
+
 async function handleTts(req, res) {
   const body = await readBody(req);
   const raw = typeof body.text === 'string' ? body.text.trim() : '';
@@ -475,17 +655,45 @@ async function handleTts(req, res) {
 
   const settings = readSettings();
   const input = raw.slice(0, MAX_TTS_CHARS);
-  const voice = typeof body.voice === 'string' && body.voice.trim() ? body.voice.trim() : settings.tts.voice;
+  const chosenVoice = typeof body.voice === 'string' && body.voice.trim() ? body.voice.trim() : settings.tts.voice;
+
+  // Buddy's own voice: a neural model in this process. Nothing leaves the machine.
+  if (settings.tts.provider === 'kokoro') {
+    if (!voice.isReady(configDir())) {
+      return sendJson(res, 503, {
+        error: "Buddy's voice is still downloading.",
+        needsSpeech: true,
+        speech: voice.snapshot(),
+      });
+    }
+    const spoken = await voice.speak({
+      configDir: configDir(),
+      text: input,
+      voice: chosenVoice,
+      speed: settings.tts.speed,
+    });
+    res.writeHead(200, {
+      'Content-Type': spoken.contentType,
+      'Content-Length': spoken.audio.length,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(spoken.audio);
+  }
 
   // The OS voices live in the renderer process, so hand the text back and let
-  // speechSynthesis say it. Nothing leaves the machine on this path.
+  // speechSynthesis say it. Nothing leaves the machine on this path either.
   if (settings.tts.provider === 'system') {
-    return sendJson(res, 200, { mode: 'system', text: input, voice });
+    return sendJson(res, 200, { mode: 'system', text: voice.speakableText(input), voice: chosenVoice });
   }
 
   const zai = await getZai();
   // Verified: the key is `input`, and this resolves to a raw Response.
-  const response = await zai.audio.tts.create({ input, voice, response_format: 'wav', stream: false });
+  const response = await zai.audio.tts.create({
+    input: voice.speakableText(input),
+    voice: chosenVoice,
+    response_format: 'wav',
+    stream: false,
+  });
 
   let audio = null;
   let contentType = 'audio/wav';
@@ -515,36 +723,76 @@ async function handleTts(req, res) {
   return res.end(audio);
 }
 
+/**
+ * The renderer always sends raw 16 kHz float samples, whichever provider is in
+ * use — that is what the in-app Whisper wants, and giving the wav header to the
+ * others here means the microphone code never has to know who is listening.
+ * The older `{ audio, mimeType }` form still works for anything scripting this.
+ */
 async function handleAsr(req, res) {
   const body = await readBody(req);
-  const supplied = typeof body.audio === 'string' ? body.audio : '';
-  // Accept a bare base64 payload or a full `data:audio/webm;base64,...` URI.
-  const base64 = supplied.includes(',') ? supplied.slice(supplied.indexOf(',') + 1) : supplied;
-  if (!base64.trim()) return sendJson(res, 400, { error: 'audio (base64) is required' });
-
   const settings = readSettings();
 
   if (settings.asr.provider === 'off') {
     return sendJson(res, 400, {
-      error: 'Voice input is turned off. Add a local Whisper server, or switch hearing to z-ai.',
+      error: 'Buddy is set not to listen. Turn hearing back on in settings to use the microphone.',
       asrOff: true,
     });
   }
+
+  const sampleRate = Number(body.sampleRate) > 0 ? Number(body.sampleRate) : hearing.SAMPLE_RATE;
+  const samples = typeof body.pcm === 'string' ? audio.float32FromBase64(body.pcm) : null;
+
+  const supplied = typeof body.audio === 'string' ? body.audio : '';
+  const encoded = supplied.includes(',') ? supplied.slice(supplied.indexOf(',') + 1) : supplied;
+
+  if ((!samples || !samples.length) && !encoded.trim()) {
+    return sendJson(res, 400, { error: 'pcm (base64 float32) or audio (base64) is required' });
+  }
+
+  if (settings.asr.provider === 'local') {
+    if (!samples || !samples.length) {
+      return sendJson(res, 400, {
+        error: "Buddy's own ears need raw samples — send pcm rather than an encoded clip.",
+      });
+    }
+    if (!hearing.isReady(configDir())) {
+      return sendJson(res, 503, {
+        error: "Buddy's hearing is still downloading.",
+        needsSpeech: true,
+        speech: hearing.snapshot(),
+      });
+    }
+    const text = await hearing.transcribe({
+      configDir: configDir(),
+      samples: audio.resample(samples, sampleRate, hearing.SAMPLE_RATE),
+    });
+    return sendJson(res, 200, { text });
+  }
+
+  // Everything else wants a file, so give the samples a wav header.
+  const clip =
+    samples && samples.length
+      ? { bytes: audio.wavFromFloat32(samples, sampleRate), mimeType: 'audio/wav' }
+      : {
+          bytes: Buffer.from(encoded.trim(), 'base64'),
+          mimeType: typeof body.mimeType === 'string' ? body.mimeType : 'audio/webm',
+        };
 
   if (settings.asr.provider === 'whisper') {
     const result = await providers.whisperTranscribe({
       baseUrl: settings.asr.baseUrl,
       model: settings.asr.model,
-      audio: Buffer.from(base64.trim(), 'base64'),
-      mimeType: typeof body.mimeType === 'string' ? body.mimeType : 'audio/webm',
+      audio: clip.bytes,
+      mimeType: clip.mimeType,
     });
-    return sendJson(res, 200, { text: extractTranscript(result) });
+    return sendJson(res, 200, { text: hearing.meaningfulText(extractTranscript(result)) });
   }
 
   const zai = await getZai();
   // Verified: the key is `file_base64`, and the transcript comes back on .text.
-  const result = await zai.audio.asr.create({ file_base64: base64.trim() });
-  return sendJson(res, 200, { text: extractTranscript(result) });
+  const result = await zai.audio.asr.create({ file_base64: clip.bytes.toString('base64') });
+  return sendJson(res, 200, { text: hearing.meaningfulText(extractTranscript(result)) });
 }
 
 // ── chat history ──────────────────────────────────────────────────────────
@@ -589,6 +837,7 @@ async function handleClearChats(_req, res) {
 // ── routing ───────────────────────────────────────────────────────────────
 
 const UUID = '([0-9a-fA-F-]{36})';
+const MODEL_ID = '([a-z0-9][a-z0-9._-]{0,63})';
 
 const ROUTES = [
   ['GET', /^\/health$/, (req, res) => sendJson(res, 200, describeRuntime())],
@@ -597,8 +846,15 @@ const ROUTES = [
   ['GET', /^\/providers\/status$/, handleProviderStatus],
   ['GET', /^\/model$/, handleModelState],
   ['POST', /^\/model$/, handleModelDownload],
+  ['GET', /^\/models$/, handleListModels],
+  ['POST', new RegExp(`^/models/${MODEL_ID}$`), handleDownloadModel],
+  ['DELETE', new RegExp(`^/models/${MODEL_ID}$`), handleRemoveModel],
+  ['GET', /^\/speech$/, handleSpeechState],
+  ['POST', /^\/speech$/, handleSpeechDownload],
+  ['GET', /^\/voices$/, handleListVoices],
   ['POST', /^\/setup$/, handleSetup],
   ['POST', /^\/chat$/, handleChat],
+  ['POST', /^\/tts\/plan$/, handleTtsPlan],
   ['POST', /^\/tts$/, handleTts],
   ['POST', /^\/asr$/, handleAsr],
   ['GET', /^\/chats$/, handleListChats],
@@ -705,20 +961,31 @@ function start(options = {}) {
       console.log('  ✦ Buddy local server');
       console.log(`    http://127.0.0.1:${port}`);
       console.log(`    config   ${configDir()}${isConfigured() ? '' : '  (not set up yet)'}`);
-      const modelState = modelStore.snapshot(configDir());
+      const modelId = activeModelId(settings);
+      const modelState = modelStore.snapshot(configDir(), modelId);
       console.log(
         `    chat     ${settings.chat.provider} (${where(settings.chat.provider)})` +
           (settings.chat.provider === 'ollama'
             ? ` · ${settings.chat.model || providers.OLLAMA_DEFAULT_MODEL} · ${settings.chat.baseUrl}`
             : '') +
           (settings.chat.provider === 'builtin'
-            ? ` · ${modelStore.MODEL.label} · ${modelState.ready ? 'model ready' : 'model NOT downloaded yet'}`
+            ? ` · ${modelStore.get(modelId).label} · ${modelState.ready ? 'model ready' : 'model NOT downloaded yet'}`
             : '')
       );
-      console.log(`    voice    ${settings.tts.provider} (${where(settings.tts.provider)})`);
+      console.log(
+        `    voice    ${settings.tts.provider} (${where(settings.tts.provider)})` +
+          (settings.tts.provider === 'kokoro'
+            ? ` · ${settings.tts.voice || voice.DEFAULT_VOICE} · ${
+                voice.isReady(configDir()) ? 'ready' : 'NOT downloaded yet'
+              }`
+            : '')
+      );
       console.log(
         `    hearing  ${settings.asr.provider} (${where(settings.asr.provider)})` +
-          (settings.asr.provider === 'whisper' ? ` · ${settings.asr.baseUrl}` : '')
+          (settings.asr.provider === 'whisper' ? ` · ${settings.asr.baseUrl}` : '') +
+          (settings.asr.provider === 'local'
+            ? ` · ${hearing.isReady(configDir()) ? 'ready' : 'NOT downloaded yet'}`
+            : '')
       );
       console.log(
         `    history  ${settings.saveHistory ? 'saved on this device' : 'not saved'} · ` +
@@ -732,7 +999,7 @@ function start(options = {}) {
   });
 }
 
-module.exports = { start, readConfig, readSettings, isConfigured, configPath, AUTH_TOKEN };
+module.exports = { start, readConfig, readSettings, isConfigured, activeModelId, configPath, AUTH_TOKEN };
 
 // Standalone: `npm run server`.
 if (require.main === module) {

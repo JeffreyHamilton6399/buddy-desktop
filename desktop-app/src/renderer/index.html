@@ -15,10 +15,14 @@
     <!-- ── orb window ─────────────────────────────────────────────────── -->
     <div class="root" id="root-orb" hidden>
       <div class="orb-stage">
+        <div class="orb-glow" aria-hidden="true"></div>
         <div class="orb-ring" id="orb-ring" aria-hidden="true"></div>
+        <div class="orb-ripple" id="orb-ripple" aria-hidden="true"></div>
         <button class="orb" id="orb" type="button" aria-label="Ask Buddy">
           <span class="orb-core"></span>
           <span class="orb-sheen"></span>
+          <!-- Grows and shrinks with how loudly you are speaking. -->
+          <span class="orb-level" id="orb-level" aria-hidden="true"></span>
         </button>
         <span class="orb-dot" id="orb-dot" aria-hidden="true"></span>
         <div class="orb-tooltip" id="orb-tooltip">Ask Buddy</div>
@@ -30,11 +34,17 @@
     <div class="root" id="root-panel" hidden>
       <section class="panel">
         <header class="panel-head">
-          <span class="mini-orb" aria-hidden="true"></span>
-          <div class="panel-title">
-            <strong>Buddy</strong>
-            <span class="panel-status" id="status">connecting…</span>
-          </div>
+          <!-- The identity is the way into settings. -->
+          <button class="panel-identity" id="open-settings" type="button" title="Settings" aria-label="Open settings">
+            <span class="mini-orb" aria-hidden="true"></span>
+            <span class="panel-title">
+              <strong>Buddy</strong>
+              <span class="panel-status" id="status">connecting…</span>
+            </span>
+            <svg class="identity-chevron" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
           <div class="panel-actions">
             <button class="icon-btn" id="history-btn" type="button" title="Your chats" aria-label="Show saved chats">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -82,16 +92,178 @@
                 </svg>
               </button>
             </header>
-
             <div class="drawer-list" id="chat-list"></div>
+          </aside>
 
-            <footer class="drawer-foot">
-              <label class="switch">
-                <input type="checkbox" id="save-history" checked />
-                <span>Save new chats to this device</span>
-              </label>
-              <button class="danger" id="clear-history" type="button">Delete all saved chats</button>
-            </footer>
+          <!-- ── settings, slid over everything ──────────────────────── -->
+          <aside class="sheet" id="settings" hidden aria-label="Settings">
+            <header class="sheet-head">
+              <button class="icon-btn" id="settings-back" type="button" title="Back to chat" aria-label="Back to chat">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15 6l-6 6 6 6" />
+                </svg>
+              </button>
+              <strong>Settings</strong>
+              <span class="sheet-note" id="settings-note"></span>
+            </header>
+
+            <div class="sheet-body">
+              <!-- the tab rail the user asked for, down the side -->
+              <nav class="rail" id="settings-rail" role="tablist" aria-label="Settings sections">
+                <button class="rail-tab is-on" type="button" role="tab" data-pane="brain" aria-selected="true">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 4a4 4 0 0 0-4 4 3 3 0 0 0-1 5.8V16a3 3 0 0 0 3 3h4a3 3 0 0 0 3-3v-2.2A3 3 0 0 0 16 8a4 4 0 0 0-4-4z" />
+                  </svg>
+                  <span>Brain</span>
+                </button>
+                <button class="rail-tab" type="button" role="tab" data-pane="voice" aria-selected="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 10v4h3l4 3V7L7 10H4z" />
+                    <path d="M15.5 9.2a3.6 3.6 0 0 1 0 5.6" />
+                  </svg>
+                  <span>Voice</span>
+                </button>
+                <button class="rail-tab" type="button" role="tab" data-pane="hearing" aria-selected="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="9" y="3" width="6" height="11" rx="3" />
+                    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+                  </svg>
+                  <span>Hearing</span>
+                </button>
+                <button class="rail-tab" type="button" role="tab" data-pane="chats" aria-selected="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M20 15a3 3 0 0 1-3 3H8l-4 3V6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3z" />
+                  </svg>
+                  <span>Chats</span>
+                </button>
+                <button class="rail-tab" type="button" role="tab" data-pane="about" aria-selected="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 11v5M12 8h.01" />
+                  </svg>
+                  <span>About</span>
+                </button>
+              </nav>
+
+              <div class="panes" id="settings-panes">
+                <!-- ── brain: which model answers ─────────────────── -->
+                <section class="pane is-on" data-pane="brain" role="tabpanel">
+                  <h2>Which model answers</h2>
+                  <p class="pane-lede">
+                    Buddy downloads these itself and runs them on this machine. Bigger is smarter and slower.
+                  </p>
+                  <div class="model-list" id="model-list"></div>
+
+                  <h3>Bring your own from Ollama</h3>
+                  <p class="pane-lede" id="ollama-lede">Looking for Ollama on this machine…</p>
+                  <div class="model-list" id="ollama-list"></div>
+
+                  <h3>Or use a cloud API</h3>
+                  <div class="row" id="cloud-row">
+                    <button class="btn" id="use-cloud" type="button">Use the z-ai cloud instead</button>
+                  </div>
+                </section>
+
+                <!-- ── voice ──────────────────────────────────────── -->
+                <section class="pane" data-pane="voice" role="tabpanel">
+                  <h2>How Buddy sounds</h2>
+                  <div class="asset" id="voice-asset" hidden>
+                    <div class="asset-text">
+                      <strong id="voice-asset-title">Buddy's own voice isn't downloaded yet</strong>
+                      <span id="voice-asset-sub">A one-time 156 MB download. After it, speaking never needs the internet.</span>
+                    </div>
+                    <div class="bar" aria-hidden="true"><span class="bar-fill" id="voice-bar"></span></div>
+                    <button class="btn primary" id="voice-get" type="button">Download it</button>
+                  </div>
+
+                  <label for="tts-provider">Voice engine</label>
+                  <select id="tts-provider">
+                    <option value="kokoro">Buddy's own voice — neural, on this machine</option>
+                    <option value="system">This computer's built-in voices</option>
+                    <option value="z-ai">The z-ai cloud (needs an API key)</option>
+                  </select>
+
+                  <div id="kokoro-options">
+                    <label for="tts-voice">Voice</label>
+                    <select id="tts-voice"></select>
+
+                    <label for="tts-speed">Speed — <span id="tts-speed-value">1.0x</span></label>
+                    <input id="tts-speed" type="range" min="0.7" max="1.4" step="0.05" value="1" />
+                  </div>
+
+                  <div id="system-options" hidden>
+                    <label for="system-voice">Voice</label>
+                    <select id="system-voice"></select>
+                  </div>
+
+                  <div class="row">
+                    <button class="btn" id="voice-preview" type="button">Hear it</button>
+                    <span class="row-note" id="voice-preview-note"></span>
+                  </div>
+                </section>
+
+                <!-- ── hearing / wake word ────────────────────────── -->
+                <section class="pane" data-pane="hearing" role="tabpanel">
+                  <h2>Listening for you</h2>
+                  <div class="asset" id="hearing-asset" hidden>
+                    <div class="asset-text">
+                      <strong id="hearing-asset-title">Buddy's ears aren't downloaded yet</strong>
+                      <span id="hearing-asset-sub">A one-time 39 MB download. After it, listening never needs the internet.</span>
+                    </div>
+                    <div class="bar" aria-hidden="true"><span class="bar-fill" id="hearing-bar"></span></div>
+                    <button class="btn primary" id="hearing-get" type="button">Download it</button>
+                  </div>
+
+                  <label class="switch big">
+                    <input type="checkbox" id="wake-toggle" />
+                    <span>
+                      <strong>Answer to “Hey Buddy”</strong>
+                      <small>The orb listens for its name and opens when it hears you. Audio never leaves this machine.</small>
+                    </span>
+                  </label>
+
+                  <label for="asr-provider">Transcription</label>
+                  <select id="asr-provider">
+                    <option value="local">Buddy's own ears — Whisper, on this machine</option>
+                    <option value="whisper">A Whisper server I run myself</option>
+                    <option value="z-ai">The z-ai cloud (needs an API key)</option>
+                    <option value="off">Off — Buddy cannot hear at all</option>
+                  </select>
+
+                  <div id="whisper-options" hidden>
+                    <label for="whisper-url">Server address</label>
+                    <input id="whisper-url" type="url" spellcheck="false" autocomplete="off" />
+                  </div>
+
+                  <div class="row">
+                    <button class="btn" id="mic-test" type="button">Test the microphone</button>
+                    <span class="row-note" id="mic-test-note"></span>
+                  </div>
+                </section>
+
+                <!-- ── chats / privacy ────────────────────────────── -->
+                <section class="pane" data-pane="chats" role="tabpanel">
+                  <h2>Your conversations</h2>
+                  <label class="switch big">
+                    <input type="checkbox" id="save-history" />
+                    <span>
+                      <strong>Keep chats on this device</strong>
+                      <small>Stored as a plain file in Buddy's own folder. Nothing is uploaded.</small>
+                    </span>
+                  </label>
+                  <p class="pane-lede" id="chat-count"></p>
+                  <button class="danger" id="clear-history" type="button">Delete all saved chats</button>
+                </section>
+
+                <!-- ── about ──────────────────────────────────────── -->
+                <section class="pane" data-pane="about" role="tabpanel">
+                  <h2>About Buddy</h2>
+                  <p class="pane-lede" id="about-version"></p>
+                  <div class="facts" id="about-facts"></div>
+                  <button class="btn" id="open-folder" type="button">Show Buddy's folder</button>
+                </section>
+              </div>
+            </div>
           </aside>
         </div>
 
@@ -177,6 +349,6 @@
       </section>
     </div>
 
-    <script src="renderer.js"></script>
+    <script type="module" src="renderer.js"></script>
   </body>
 </html>

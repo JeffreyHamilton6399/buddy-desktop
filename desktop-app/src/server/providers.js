@@ -4,14 +4,16 @@
  * Each capability — chat, speech synthesis, speech recognition — can be served
  * either by the z-ai cloud API or by something running on this machine:
  *
- *   chat  builtin │ ollama  │ z-ai   builtin = llama.cpp inside the app
- *   tts   system  │ z-ai            system  = the OS's own voices, in the renderer
- *   asr   off     │ whisper │ z-ai   whisper = a local /audio/transcriptions server
+ *   chat  builtin │ ollama  │ z-ai      builtin = llama.cpp inside the app
+ *   tts   kokoro  │ system  │ z-ai      kokoro  = neural TTS inside the app
+ *   asr   local   │ whisper │ z-ai │ off  local = Whisper inside the app
  *
- * The defaults are the first of each: Buddy answers with its own model, speaks
- * with the voices already on the machine, and keeps the microphone shut. Nothing
- * to configure, no key, and nothing leaves the device. Mix and match freely —
- * local chat with cloud speech works, and so does the reverse.
+ * The defaults are the first of each, so out of the box Buddy thinks, speaks and
+ * listens entirely on this machine: no key, no account, and nothing leaves the
+ * device. `system` (the OS's own robotic voices) and `whisper` (a separate
+ * transcription server you run) stay as alternatives, and `off` is still a real
+ * choice for anyone who would rather Buddy could not hear at all. Mix and match
+ * freely — local chat with cloud speech works, and so does the reverse.
  */
 'use strict';
 
@@ -20,23 +22,53 @@ const path = require('path');
 // 'builtin' is llama.cpp inside the app — the default, so Buddy works with no
 // key and no account the moment its model has downloaded.
 const CHAT_PROVIDERS = ['builtin', 'z-ai', 'ollama'];
-const TTS_PROVIDERS = ['z-ai', 'system'];
-// 'off' is a real choice, not a failure: local mode without a Whisper server
-// still works fine by typing, and the mic and wake word simply stay dark.
-const ASR_PROVIDERS = ['z-ai', 'whisper', 'off'];
+// 'kokoro' is neural TTS inside the app; 'system' is the OS's own voices, spoken
+// in the renderer by speechSynthesis.
+const TTS_PROVIDERS = ['kokoro', 'system', 'z-ai'];
+// 'local' is Whisper inside the app. 'off' is still a real choice, not a failure:
+// typing works exactly the same, and the mic and wake word simply stay dark.
+const ASR_PROVIDERS = ['local', 'whisper', 'z-ai', 'off'];
 
-// Everything defaults to this machine: a bundled-in model, the OS's own voices,
-// and the microphone closed. Nothing to configure and nothing leaves the device.
+// Everything defaults to this machine: Buddy's own model, its own voice, and its
+// own ears. Nothing to configure and nothing leaves the device.
 const DEFAULTS = {
-  chat: { provider: 'builtin', model: '', baseUrl: 'http://127.0.0.1:11434' },
-  tts: { provider: 'system', voice: '' },
-  asr: { provider: 'off', baseUrl: 'http://127.0.0.1:8000/v1', model: 'Systran/faster-whisper-small' },
+  chat: { provider: 'builtin', model: '', builtinModel: '', baseUrl: 'http://127.0.0.1:11434' },
+  tts: { provider: 'kokoro', voice: '', speed: 1 },
+  asr: { provider: 'local', baseUrl: 'http://127.0.0.1:8000/v1', model: 'Systran/faster-whisper-small' },
   saveHistory: true,
 };
+
+/** Bumped whenever defaults change in a way an existing install should inherit. */
+const SETTINGS_VERSION = 2;
 
 const OLLAMA_DEFAULT_MODEL = 'llama3.2';
 const REQUEST_TIMEOUT_MS = 120000;
 const PROBE_TIMEOUT_MS = 2500;
+
+/**
+ * Bring an older settings file forward.
+ *
+ * Buddy shipped before it had a voice or ears of its own, so those installs are
+ * sitting on `tts: system` and `asr: off` — which were the best available then
+ * and are now merely the fallbacks. Anyone who never chose those explicitly
+ * should get the good ones on upgrade; anyone who did keep a deliberate choice
+ * (the cloud, or a Whisper server of their own) is left exactly as they are.
+ */
+function migrateSettings(raw) {
+  const input = raw && typeof raw === 'object' ? { ...raw } : {};
+  if (Number(input.version) >= SETTINGS_VERSION) return input;
+
+  const tts = { ...(input.tts || {}) };
+  const asr = { ...(input.asr || {}) };
+
+  if (!tts.provider || tts.provider === 'system') tts.provider = DEFAULTS.tts.provider;
+  if (!asr.provider || asr.provider === 'off') asr.provider = DEFAULTS.asr.provider;
+  // 'system' voices are named per OS ("Microsoft Zira Desktop"); a Kokoro voice
+  // id looks nothing like that, so a carried-over name would never match.
+  if (tts.provider === 'kokoro' && tts.voice && !/^[a-z]{2}_[a-z]+$/.test(tts.voice)) tts.voice = '';
+
+  return { ...input, tts, asr, version: SETTINGS_VERSION };
+}
 
 /** Coerce whatever is on disk into a complete, valid settings object. */
 function normaliseSettings(raw) {
@@ -44,20 +76,25 @@ function normaliseSettings(raw) {
   const pick = (value, allowed, fallback) =>
     typeof value === 'string' && allowed.includes(value) ? value : fallback;
   const text = (value, fallback) => (typeof value === 'string' && value.trim() ? value.trim() : fallback);
+  const number = (value, fallback, low, high) =>
+    Number.isFinite(Number(value)) && Number(value) >= low && Number(value) <= high ? Number(value) : fallback;
 
   const chat = input.chat || {};
   const tts = input.tts || {};
   const asr = input.asr || {};
 
   return {
+    version: SETTINGS_VERSION,
     chat: {
       provider: pick(chat.provider, CHAT_PROVIDERS, DEFAULTS.chat.provider),
       model: text(chat.model, DEFAULTS.chat.model),
+      builtinModel: text(chat.builtinModel, DEFAULTS.chat.builtinModel),
       baseUrl: text(chat.baseUrl, DEFAULTS.chat.baseUrl).replace(/\/+$/, ''),
     },
     tts: {
       provider: pick(tts.provider, TTS_PROVIDERS, DEFAULTS.tts.provider),
       voice: text(tts.voice, DEFAULTS.tts.voice),
+      speed: number(tts.speed, DEFAULTS.tts.speed, 0.6, 1.6),
     },
     asr: {
       provider: pick(asr.provider, ASR_PROVIDERS, DEFAULTS.asr.provider),
@@ -71,6 +108,15 @@ function normaliseSettings(raw) {
 /** True when no capability touches the network. */
 function isFullyLocal(settings) {
   return settings.chat.provider !== 'z-ai' && settings.tts.provider !== 'z-ai' && settings.asr.provider !== 'z-ai';
+}
+
+/** True when speaking and listening are done by the models inside the app. */
+function usesLocalVoice(settings) {
+  return settings.tts.provider === 'kokoro';
+}
+
+function usesLocalHearing(settings) {
+  return settings.asr.provider === 'local';
 }
 
 /** True when chat is answered by the model living inside the app. */
@@ -223,11 +269,15 @@ async function probeProviders(settings) {
 
 module.exports = {
   usesBuiltinModel,
+  usesLocalVoice,
+  usesLocalHearing,
   CHAT_PROVIDERS,
   TTS_PROVIDERS,
   ASR_PROVIDERS,
   DEFAULTS,
+  SETTINGS_VERSION,
   OLLAMA_DEFAULT_MODEL,
+  migrateSettings,
   normaliseSettings,
   isFullyLocal,
   cloudCapabilities,

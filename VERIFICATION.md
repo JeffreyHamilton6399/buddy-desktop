@@ -379,3 +379,122 @@ always valid, and an IDAT-chunking change made on that wrong assumption was reve
   electron-builder 24 behaviour; fixing it means restructuring into a `build/icons/` set. AppImage is
   unaffected.
 - **Auto-update is not wired up**, despite the `latest*.yml` files electron-builder publishes.
+
+---
+
+## v1.2.0 — Buddy's own voice and ears, and a settings panel
+
+Four complaints drove this round: the voice was bad, there was no way to choose a model, the header
+"didn't give a feel or sense of anything", and the orb showed a square ring. All ran on **Electron 43
+/ Node 24.15.0, Windows 10 Pro (19045)**.
+
+### The choices were measured, not guessed
+
+Everything about which model to ship was decided by running them on this machine rather than by
+reading model cards. Kokoro, synthesizing the same phrase, warm:
+
+| Weights | On disk | Speed | Verdict |
+| --- | --- | --- | --- |
+| q8 | 88 MB | **0.9× realtime** | unusable — generates slower than it plays, so Buddy falls further behind the longer it talks |
+| fp16 | 156 MB | 2.4× | **shipped** |
+| q4 | 291 MB | 2.4× | no smaller than fp32 in practice |
+| fp32 | 310 MB | 2.6× | twice the disk for 8% more speed |
+
+Through the real `/tts` endpoint, warm and with the ack cache bypassed, fp16 held **1.7–1.9×
+realtime** — enough that chunked playback stays ahead of itself. DirectML was tried for both models
+and **fails on Kokoro** (`ConvTranspose` unsupported by the DML provider), so both run on CPU.
+
+Whisper, transcribing four phrases spoken by two different Kokoro voices:
+
+| Model | On disk | Load | 4 clips | Accuracy |
+| --- | --- | --- | --- | --- |
+| **tiny.en** | 39 MB | 0.85s | 2.26s | all four correct |
+| base.en | 73 MB | 8.4s | 3.47s | all four correct |
+
+tiny.en is half the size and about 1.5× faster for the same result, so it ships. Wake-word checks run
+constantly, which makes the cheap one the right one.
+
+### End to end, through the real endpoints
+
+Kokoro was made to speak a phrase and Whisper to read it back, both through the running server:
+
+```
+said:  "Hey Buddy, remind me to water the plants tomorrow morning."
+heard: "Hey buddy, remind me to water the plants tomorrow morning."
+contains "hey buddy": true
+```
+
+### Four bugs found by running it
+
+1. **Silence transcribed as words.** Two seconds of digital silence came back from Whisper as `"you"`
+   — a documented hallucination, and the single most common input for an always-listening orb, which
+   would have had Buddy answering questions nobody asked. Bracketed sound effects *and* a set of known
+   stock phrases are now discarded. Re-checked after the fix: digital silence, faint hiss and a 50 ms
+   blip all return empty.
+2. **Speech started far too late.** The first chunk of a reply was up to 240 characters — about three
+   seconds of synthesis before the first word. Chunks are now ~150 characters and the *first* is capped
+   at 70, so speaking starts in about a second. List items also ran together (`"the ocean is large it
+   is salty"`) and now get terminal punctuation so the voice pauses.
+3. **A first-run loop that could never end.** Setup wrote only `chat.provider` on finishing, so an
+   install whose `tts`/`asr` pointed at the cloud kept them — and cloud capabilities with no API key
+   never count as configured, so setup reopened on every launch, forever. Hit accidentally while
+   testing, which is how it was found. Setup now writes all three providers explicitly.
+4. **A BOM in `buddy-state.json` silently reset the orb.** `JSON.parse` throws on a leading byte-order
+   mark and the catch treated it as a first run, losing the saved position. Nothing Buddy writes has
+   one; an editor might. Now stripped.
+
+### Verified by driving the real app
+
+The app was launched and driven with synthetic mouse input on a real desktop, and screenshotted:
+
+- **The square ring is gone.** Confirmed against a zoomed screen capture: the halo fades smoothly into
+  the desktop with no rectangular edge.
+- **Clicking the orb opens the panel.** `travelled=0.0px` was measured on mousedown/mouseup, and the
+  orb held its position exactly across repeated clicks — the click-versus-drag split works.
+- **Position migration works.** An install saved at `1374,174` with the old 80px window reopened at
+  `1340,140` with the 128px one, leaving the visible circle in the same place on screen.
+- **Settings opens from the identity** and all five panes render: the model catalogue with sizes and an
+  "Answering now" badge, 28 Kokoro voices, the hearing controls, chats, and an About pane that reports
+  each job as "on this machine".
+- **Chat works with the local model.** "name three colours" → "Red, Blue, Green.", with
+  `model loaded in 8.2s (0.74 GB, vulkan)` and `voice ready in 1.4s (Kokoro fp16)` in the log.
+- **The packaged build works.** `electron-builder --win --dir` produced a 577 MB app whose voice list
+  populated and whose "Hear it" preview succeeded — proving transformers.js, `onnxruntime-node` and
+  `kokoro-js` all load from `app.asar.unpacked`. Only win32 ONNX binaries were included; the darwin and
+  linux sets (141 MB) were pruned.
+
+### An approach tried and abandoned
+
+The orb window was first made 148px with the surplus set click-through via
+`setIgnoreMouseEvents(true, { forward: true })`, so it would not swallow clicks meant for windows
+underneath. It was **removed after testing**: it depends on Electron forwarding mouse-move messages to
+decide when to become solid again, that forwarding did not arrive reliably here, and the failure mode
+is an orb that **cannot be clicked at all** — verified, twice, with no `mousedown` reaching the
+renderer. The window is now 128px, always interactive, and every animation is sized to fit inside it.
+The cost is an invisible 128px square that captures clicks where 80px used to; that is the same class
+of behaviour as before, and it always works.
+
+### What could not be verified here
+
+- **The wake word has never been triggered by a real voice.** This machine has **no active microphone**
+  — the only input device is a disconnected Bluetooth headset — so `getUserMedia` fails with
+  `NotFoundError`. Buddy handles that correctly and visibly (it turns the wake word off, tells the tray,
+  and shows "Mic blocked" on the orb), and every stage *after* audio capture is verified: the detector's
+  maths, `/asr` on real speech, the fuzzy phrase matcher, and the greeting. But the live path —
+  AudioWorklet → voice detection → clip → wake — is **untested end to end**, including the
+  pre-roll buffer that is supposed to stop the leading "Hey" being clipped. This is the biggest gap in
+  this release.
+- **Nothing was heard.** No audio output was captured, so the *quality* of the Kokoro voice is
+  unjudged. What is verified is that it produces well-formed 24 kHz wav audio of the expected length,
+  at a speed that keeps ahead of playback.
+- **`system` and `z-ai` speech paths were not re-run** after the refactor; only the two in-app engines
+  were exercised.
+- **No installer was built or run** — only `--dir`. macOS and Linux were not built at all, so the
+  per-platform ONNX pruning is verified only for Windows.
+- **The 3B and 7B models were never downloaded.** Their sizes and SHA-256 digests come from
+  HuggingFace's `paths-info` API (the same source, and the same method, that produced the 1B entry
+  whose digest was independently confirmed correct by a real download). The download and checksum code
+  is shared with the 1B model, but these four entries have not each been fetched and verified.
+- **`sharp` is shipped but never used.** transformers.js imports it statically for image pipelines
+  Buddy has no use for, costing ~20 MB and carrying libvips CVEs that no Buddy code path can reach.
+  It cannot be excluded without patching the dependency.

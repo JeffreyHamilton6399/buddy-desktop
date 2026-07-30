@@ -1,6 +1,6 @@
 {
   "name": "buddy",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Buddy — a local-first AI companion that lives on your desktop",
   "main": "src/main.js",
   "author": "Jeffrey Hamilton",
@@ -18,6 +18,8 @@
     "dist:linux": "electron-builder --linux AppImage deb"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "kokoro-js": "^1.2.1",
     "node-llama-cpp": "^3.19.1",
     "z-ai-web-dev-sdk": "^0.0.18"
   },
@@ -33,12 +35,24 @@
       "buddy-icon.png",
       "package.json",
       "!node_modules/@node-llama-cpp/*-cuda*/**",
-      "!node_modules/@node-llama-cpp/*-vulkan/**"
+      "!node_modules/@node-llama-cpp/*-vulkan/**",
+      "!node_modules/**/*.map",
+      "!node_modules/@huggingface/transformers/dist/*.wasm",
+      "!node_modules/@huggingface/transformers/dist/transformers.js",
+      "!node_modules/@huggingface/transformers/dist/transformers.web*",
+      "!node_modules/@huggingface/transformers/dist/ort-wasm*",
+      "!node_modules/@huggingface/transformers/types/**",
+      "!node_modules/kokoro-js/dist/kokoro.web.js",
+      "!node_modules/onnxruntime-web/**"
     ],
     "asarUnpack": [
       "node_modules/z-ai-web-dev-sdk/**/*",
       "node_modules/node-llama-cpp/**/*",
-      "node_modules/@node-llama-cpp/**/*"
+      "node_modules/@node-llama-cpp/**/*",
+      "node_modules/onnxruntime-node/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
+      "node_modules/kokoro-js/**/*"
     ],
     "mac": {
       "target": [
@@ -54,11 +68,19 @@
       "icon": "buddy-icon.png",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Buddy listens for 'Hey Buddy' and your voice messages."
-      }
+      },
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v3/win32/**",
+        "!node_modules/onnxruntime-node/bin/napi-v3/linux/**"
+      ]
     },
     "win": {
       "target": "nsis",
-      "icon": "buddy-icon.png"
+      "icon": "buddy-icon.png",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v3/darwin/**",
+        "!node_modules/onnxruntime-node/bin/napi-v3/linux/**"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -74,7 +96,11 @@
       "category": "Utility",
       "icon": "buddy-icon.png",
       "maintainer": "Jeffrey Hamilton <JeffreyHamilton6399@users.noreply.github.com>",
-      "description": "A local-first AI companion that lives on your desktop as a glowing orb"
+      "description": "A local-first AI companion that lives on your desktop as a glowing orb",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v3/win32/**",
+        "!node_modules/onnxruntime-node/bin/napi-v3/darwin/**"
+      ]
     },
     "publish": {
       "provider": "github",

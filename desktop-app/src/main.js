@@ -29,7 +29,24 @@ const RENDERER_DIR = path.join(__dirname, 'renderer');
 const ICON_PATH = path.join(__dirname, '..', 'buddy-icon.png');
 const STATE_FILE = () => path.join(app.getPath('userData'), 'buddy-state.json');
 
-const ORB_SIZE = 80;
+/**
+ * The orb is 64px of visible circle, but its glow and its listening pulse reach
+ * past that. A window sized to the circle clips them square, which is exactly the
+ * "square ring" the orb used to show: a transparent window cannot paint outside
+ * itself, so the halo simply stopped at the edge. The window is therefore padded,
+ * and everything the renderer draws is sized to fit inside it — see styles.css,
+ * which must stay in step with these numbers.
+ *
+ * The padding is kept as small as the glow allows, because a transparent window
+ * still captures clicks across its whole rectangle. Making the surplus
+ * click-through was tried and abandoned: it depends on Electron forwarding mouse
+ * move messages, that forwarding proved unreliable here, and its failure mode is
+ * an orb that cannot be clicked at all.
+ */
+const ORB_VISUAL = 64;
+const ORB_WINDOW = 128;
+const ORB_INSET = (ORB_WINDOW - ORB_VISUAL) / 2;
+
 const PANEL_WIDTH = 420;
 const PANEL_HEIGHT = 620;
 const SETUP_WIDTH = 470;
@@ -53,17 +70,34 @@ let dragTimer = null;
 
 // ── persisted state ───────────────────────────────────────────────────────
 
-let state = { orb: null, wakeEnabled: true };
+let state = { orb: null, wakeEnabled: true, orbWindowSize: ORB_WINDOW };
 
 function loadState() {
   try {
-    const parsed = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
+    // A byte-order mark makes JSON.parse throw, which would silently reset the
+    // orb's position. Nothing Buddy writes has one, but anything that has ever
+    // opened this file in an editor might.
+    const parsed = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8').replace(/^\uFEFF/, ''));
     if (parsed && typeof parsed === 'object') {
-      state = { orb: parsed.orb || null, wakeEnabled: parsed.wakeEnabled !== false };
+      state = {
+        orb: parsed.orb || null,
+        wakeEnabled: parsed.wakeEnabled !== false,
+        orbWindowSize: Number(parsed.orbWindowSize) || 80,
+      };
     }
   } catch {
     /* first run, or unreadable — defaults are fine */
   }
+
+  // A saved position is the window's corner, so growing the window would shift
+  // the visible orb. Move the corner by half the difference to leave the circle
+  // exactly where the user last put it.
+  if (state.orb && state.orbWindowSize !== ORB_WINDOW) {
+    const shift = (ORB_WINDOW - state.orbWindowSize) / 2;
+    state.orb = { x: Math.round(state.orb.x - shift), y: Math.round(state.orb.y - shift) };
+  }
+  state.orbWindowSize = ORB_WINDOW;
+
   wakeEnabled = state.wakeEnabled;
 }
 
@@ -209,9 +243,10 @@ const webPreferences = () => ({
 
 function defaultOrbPosition() {
   const { workArea } = screen.getPrimaryDisplay();
+  // Offsets are measured to the visible circle, not the padded window.
   return {
-    x: Math.round(workArea.x + workArea.width - ORB_SIZE - 32),
-    y: Math.round(workArea.y + 48),
+    x: Math.round(workArea.x + workArea.width - ORB_INSET - ORB_VISUAL - 32),
+    y: Math.round(workArea.y + 48 - ORB_INSET),
   };
 }
 
@@ -221,9 +256,9 @@ function clampToDisplays(position) {
   const fits = displays.some((display) => {
     const a = display.workArea;
     return (
-      position.x + ORB_SIZE > a.x &&
+      position.x + ORB_WINDOW > a.x &&
       position.x < a.x + a.width &&
-      position.y + ORB_SIZE > a.y &&
+      position.y + ORB_WINDOW > a.y &&
       position.y < a.y + a.height
     );
   });
@@ -234,14 +269,17 @@ function createOrbWindow() {
   const position = clampToDisplays(state.orb || defaultOrbPosition());
 
   orbWindow = new BrowserWindow({
-    width: ORB_SIZE,
-    height: ORB_SIZE,
+    width: ORB_WINDOW,
+    height: ORB_WINDOW,
     x: position.x,
     y: position.y,
     frame: false,
     transparent: TRANSPARENT,
     backgroundColor: TRANSPARENT ? '#00000000' : '#0b0b0f',
     hasShadow: false,
+    // Windows draws a thin frame on frameless windows unless this is off, which
+    // reads as a faint square outline around a transparent orb.
+    thickFrame: false,
     resizable: false,
     maximizable: false,
     minimizable: false,
@@ -311,15 +349,23 @@ function createPanelWindow() {
 function positionPanelNearOrb() {
   if (!panelWindow || panelWindow.isDestroyed()) return;
 
-  const anchor = orbWindow && !orbWindow.isDestroyed() ? orbWindow.getBounds() : { ...defaultOrbPosition(), width: ORB_SIZE, height: ORB_SIZE };
-  const { workArea } = screen.getDisplayNearestPoint({ x: anchor.x + ORB_SIZE / 2, y: anchor.y + ORB_SIZE / 2 });
+  const anchor =
+    orbWindow && !orbWindow.isDestroyed()
+      ? orbWindow.getBounds()
+      : { ...defaultOrbPosition(), width: ORB_WINDOW, height: ORB_WINDOW };
+  const { workArea } = screen.getDisplayNearestPoint({
+    x: anchor.x + ORB_WINDOW / 2,
+    y: anchor.y + ORB_WINDOW / 2,
+  });
 
   let x = Math.round(anchor.x + anchor.width / 2 - PANEL_WIDTH / 2);
-  let y = Math.round(anchor.y + anchor.height + 12);
+  // Measured from the bottom of the visible circle, not of the padded window,
+  // or the panel would float an inset's worth too far away.
+  let y = Math.round(anchor.y + ORB_INSET + ORB_VISUAL + 12);
 
   // If there is no room below the orb, sit above it instead.
   if (y + PANEL_HEIGHT > workArea.y + workArea.height) {
-    y = Math.round(anchor.y - PANEL_HEIGHT - 12);
+    y = Math.round(anchor.y + ORB_INSET - PANEL_HEIGHT - 12);
   }
   x = Math.min(Math.max(x, workArea.x + 8), workArea.x + workArea.width - PANEL_WIDTH - 8);
   y = Math.min(Math.max(y, workArea.y + 8), workArea.y + workArea.height - PANEL_HEIGHT - 8);
@@ -496,6 +542,7 @@ function registerIpc() {
     configured: isConfigured(),
     platform: process.platform,
     transparent: TRANSPARENT,
+    version: app.getVersion(),
     panelVisible: Boolean(panelWindow && !panelWindow.isDestroyed() && panelWindow.isVisible()),
   }));
 
@@ -506,6 +553,22 @@ function registerIpc() {
   ipcMain.on('buddy:orb-drag-end', () => stopDrag());
   ipcMain.on('buddy:open-external', (_event, url) => {
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
+  });
+  ipcMain.on('buddy:open-config-folder', () => shell.openPath(app.getPath('userData')));
+
+  ipcMain.on('buddy:wake-question', (_event, text) => {
+    if (typeof text !== 'string' || !text.trim()) return;
+    showPanel();
+    // The panel may have only just been created, so wait for it to be ready
+    // rather than sending into a window that is still loading.
+    const deliver = () => panelWindow.webContents.send('buddy:wake-question', text.slice(0, 2000));
+    if (!panelWindow || panelWindow.isDestroyed()) return;
+    if (panelWindow.webContents.isLoading()) panelWindow.webContents.once('did-finish-load', deliver);
+    else deliver();
+  });
+
+  ipcMain.on('buddy:runtime-changed', () => {
+    eachRenderer((window) => window.webContents.send('buddy:runtime-changed'));
   });
 
   ipcMain.on('buddy:setup-complete', () => {
