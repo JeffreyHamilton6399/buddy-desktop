@@ -520,7 +520,14 @@ Notes:
 - **`desktop-app/package-lock.json` must stay committed** — both `npm ci` and the npm cache in
   `setup-node` depend on it.
 - **Pushing anything under `.github/workflows/` needs a token with the `workflow` scope.** If your
-  token doesn't have it, add the file through the GitHub web UI (Actions → new workflow) instead.
+  token doesn't have it, add the file through the GitHub web UI (Actions → new workflow) instead, or
+  run `gh auth refresh -s workflow`.
+- **Releases used to arrive as drafts and this was easy to miss.** electron-builder defaults to
+  `releaseType: draft`, so a green build would upload every installer and yet `/releases/latest`
+  — which is what the website reads — kept answering the previous version, because the API hides
+  drafts. It looks published from the owner's own `gh release view`, which shows drafts. `build.publish.releaseType`
+  is now set to `release`; if you ever want the old behaviour back, expect to publish by hand with
+  `gh release edit vX.Y.Z --draft=false`.
 - `macos-latest` runners are arm64. The mac target is configured for `["x64", "arm64"]` so Intel Macs
   get a build too; drop `x64` if you only care about Apple Silicon.
 
