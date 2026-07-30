@@ -10,7 +10,7 @@
  */
 'use strict';
 
-import { $, api, boot, runtime, voiceInputAvailable } from './core.js';
+import { $, api, boot, runtime, refreshRuntime, voiceInputAvailable } from './core.js';
 import { openMicrophone, createVoiceDetector, samplesToBase64 } from './capture.js';
 import { createSpeaker } from './speech.js';
 
@@ -93,7 +93,20 @@ export function initOrb() {
   const level = $('orb-level');
 
   const WAKE_COOLDOWN_MS = 2500;
-  const ASR_MIN_GAP_MS = 900;
+  /**
+   * A noisy room starts clips constantly, and every clip that gets transcribed
+   * pushes this gap forward — so a wake phrase arriving just after one was
+   * dropped without ever being looked at. Whisper handles a short clip in about
+   * a third of a second, so the gap can be small.
+   */
+  const ASR_MIN_GAP_MS = 500;
+  /**
+   * "Hey Buddy" takes about a second. Listening for five before deciding buried
+   * the phrase in whatever else the room was doing and delayed every check; two
+   * and a half is long enough for the words and short enough to keep up.
+   */
+  const WAKE_CLIP_MS = 2500;
+  const WAKE_HANGOVER_MS = 500;
 
   /** How long to wait for a question after Buddy has said hello. */
   const QUESTION_WINDOW_MS = 7000;
@@ -226,7 +239,7 @@ export function initOrb() {
     questionTimer = null;
     setMode('wake');
     if (detector) {
-      detector.configure({ hangoverMs: 650, maxClipMs: 5000 });
+      detector.configure({ hangoverMs: WAKE_HANGOVER_MS, maxClipMs: WAKE_CLIP_MS });
       detector.restart();
     }
     refreshHotState();
@@ -371,6 +384,8 @@ export function initOrb() {
     }
 
     detector = createVoiceDetector({
+      hangoverMs: WAKE_HANGOVER_MS,
+      maxClipMs: WAKE_CLIP_MS,
       onSpeechStart: () => {
         if (!microphone) return;
         // Seeded from the ring buffer, so the leading "Hey" is not lost.
@@ -402,13 +417,62 @@ export function initOrb() {
     refreshHotState();
   }
 
+  /**
+   * On a new install the ears are still downloading when the orb starts up, so
+   * `voiceInputAvailable()` is false and listening never begins. Checking once at
+   * startup meant the wake word stayed silently dead until the app was restarted
+   * — nothing on screen said so, because from the outside "not listening yet" and
+   * "listening and ignoring you" look exactly the same. So keep asking until the
+   * answer changes, then start.
+   */
+  let readinessTimer = null;
+  let keepWarmTimer = null;
+
+  /**
+   * The models drop out of memory after a stretch of not being used, which is
+   * right for an app sitting idle — but not while the wake word is on, because
+   * then Buddy is claiming to be ready to answer at any moment and the first
+   * question after lunch would take twelve seconds. A periodic touch resets the
+   * idle timers and keeps that promise honest. It costs about 1.4 GB of memory,
+   * which is why it only happens while listening is switched on.
+   */
+  function keepWarm(on) {
+    clearInterval(keepWarmTimer);
+    keepWarmTimer = null;
+    if (!on) return;
+    api('/warm', {}).catch(() => {});
+    keepWarmTimer = setInterval(() => {
+      api('/warm', {}).catch(() => {});
+    }, 5 * 60 * 1000);
+  }
+
+  function watchForReadiness() {
+    clearInterval(readinessTimer);
+    readinessTimer = setInterval(async () => {
+      if (!wakeEnabled || microphone || starting) return;
+      await refreshRuntime();
+      if (voiceInputAvailable()) {
+        clearInterval(readinessTimer);
+        readinessTimer = null;
+        startListening();
+      }
+    }, 5000);
+  }
+
   function applyWakePreference(enabled) {
     wakeEnabled = Boolean(enabled);
     localStorage.setItem('buddy:wake', wakeEnabled ? 'on' : 'off');
     // With no way to transcribe, opening the microphone would be pointless —
     // and worse, dishonest about what Buddy is doing with it.
-    if (wakeEnabled && voiceInputAvailable()) startListening();
-    else stopListening();
+    if (wakeEnabled && voiceInputAvailable()) {
+      clearInterval(readinessTimer);
+      readinessTimer = null;
+      startListening();
+    } else {
+      stopListening();
+      if (wakeEnabled) watchForReadiness();
+    }
+    keepWarm(wakeEnabled);
     refreshHotState();
   }
 

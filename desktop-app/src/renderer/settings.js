@@ -385,15 +385,48 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     setNote(event.target.checked ? 'Buddy is listening for its name.' : 'Buddy has stopped listening.');
   });
 
+  /** Paint one line of the wake-word walkthrough. */
+  function reportStep(step, state, detail) {
+    const row = $('wake-probe').querySelector(`[data-step="${step}"]`);
+    if (!row) return;
+
+    // The level row also carries a live meter, fed far too often to re-render.
+    if (state === 'meter') {
+      try {
+        const { level } = JSON.parse(detail);
+        $('probe-meter').style.width = `${Math.min(100, level * 100).toFixed(1)}%`;
+      } catch {
+        /* ignore a malformed frame */
+      }
+      return;
+    }
+
+    row.classList.remove('is-run', 'is-ok', 'is-fail');
+    row.classList.add(`is-${state}`);
+    const note = row.querySelector('em');
+    if (note) note.textContent = detail || '';
+  }
+
+  function resetProbe() {
+    const probe = $('wake-probe');
+    probe.hidden = false;
+    for (const row of probe.querySelectorAll('.probe-step')) {
+      row.classList.remove('is-run', 'is-ok', 'is-fail');
+      row.querySelector('em').textContent = '';
+    }
+    $('probe-meter').style.width = '0%';
+  }
+
   $('mic-test').addEventListener('click', async () => {
     const button = $('mic-test');
     const testNote = $('mic-test-note');
     if (!onRequestMicTest) return;
 
     button.disabled = true;
-    testNote.textContent = 'Say something…';
+    resetProbe();
+    testNote.textContent = 'Say “Hey Buddy”…';
     try {
-      testNote.textContent = (await onRequestMicTest()) || 'Heard nothing at all.';
+      testNote.textContent = (await onRequestMicTest(reportStep)) || '';
     } catch (error) {
       testNote.textContent = error.message;
     }

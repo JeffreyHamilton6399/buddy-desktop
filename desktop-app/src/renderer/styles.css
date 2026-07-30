@@ -1142,6 +1142,105 @@ body.flat .panel {
   font-weight: 600;
 }
 
+/* ── wake-word walkthrough ───────────────────────────────────────────────── */
+
+.probe-list {
+  margin-top: 14px;
+  border-top: 1px solid var(--edge);
+}
+
+.probe-list[hidden] {
+  display: none;
+}
+
+.probe-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 8px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.probe-step span {
+  flex: 0 0 auto;
+}
+
+.probe-step em {
+  flex: 1;
+  min-width: 0;
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--dim, #7d6c74);
+  overflow-wrap: anywhere;
+}
+
+/* The status dot: grey until reached, amber while running, then green or rose. */
+.probe-step i {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4a4048;
+}
+
+.probe-step.is-run i {
+  background: var(--amber);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.probe-step.is-ok i {
+  background: var(--emerald);
+}
+
+.probe-step.is-fail i {
+  background: var(--rose);
+}
+
+.probe-step.is-ok {
+  color: var(--text);
+}
+
+.probe-step.is-fail {
+  color: #ffc9d2;
+}
+
+.probe-step.is-fail em {
+  color: #ffc9d2;
+}
+
+/* Live input level, so a dead or muted microphone is obvious. */
+.meter {
+  position: relative;
+  flex: 1 0 100%;
+  height: 5px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.meter-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--emerald), var(--amber));
+  transition: width 70ms linear;
+}
+
+/* Where the trigger sits, so you can see how far under it you are. */
+.meter-mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 100%;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
 /* the downloadable voice / hearing packs */
 
 .asset {

@@ -235,9 +235,27 @@
                     <input id="whisper-url" type="url" spellcheck="false" autocomplete="off" />
                   </div>
 
+                  <!--
+                    A wake word that silently does nothing is impossible to
+                    report a useful bug about, so this walks the whole chain and
+                    says which step is the one that failed.
+                  -->
                   <div class="row">
-                    <button class="btn" id="mic-test" type="button">Test the microphone</button>
+                    <button class="btn" id="mic-test" type="button">Test “Hey Buddy”</button>
                     <span class="row-note" id="mic-test-note"></span>
+                  </div>
+
+                  <div class="probe-list" id="wake-probe" hidden>
+                    <div class="probe-step" data-step="engine"><i></i><span>Transcription engine</span><em></em></div>
+                    <div class="probe-step" data-step="enabled"><i></i><span>Wake word switched on</span><em></em></div>
+                    <div class="probe-step" data-step="mic"><i></i><span>Microphone opens</span><em></em></div>
+                    <div class="probe-step" data-step="level">
+                      <i></i><span>Hearing sound</span><em></em>
+                      <div class="meter"><span class="meter-fill" id="probe-meter"></span><span class="meter-mark" id="probe-mark"></span></div>
+                    </div>
+                    <div class="probe-step" data-step="speech"><i></i><span>Speech detected</span><em></em></div>
+                    <div class="probe-step" data-step="heard"><i></i><span>Words understood</span><em></em></div>
+                    <div class="probe-step" data-step="match"><i></i><span>Matched “Hey Buddy”</span><em></em></div>
                   </div>
                 </section>
 

@@ -17,6 +17,7 @@ import {
 import { openMicrophone, createVoiceDetector, samplesToBase64 } from './capture.js';
 import { createSpeaker } from './speech.js';
 import { createSettings } from './settings.js';
+import { isWakePhrase } from './orb.js';
 
 export function initPanel() {
   const messages = $('messages');
@@ -255,7 +256,7 @@ export function initPanel() {
       window.buddy.notifyRuntimeChanged();
     },
     getWakeEnabled: () => wakeEnabled,
-    onRequestMicTest: () => micTest(),
+    onRequestMicTest: (report) => micTest(report),
   });
 
   let wakeEnabled = boot.wakeEnabled !== false;
@@ -343,33 +344,72 @@ export function initPanel() {
   }
 
   /**
-   * Settings' "test the microphone": listen until they stop talking, then report
-   * back the words. Ends early on a finished sentence rather than always making
-   * the user sit through the whole timeout.
+   * Walk the whole wake-word chain and report which link is broken.
+   *
+   * "Hey Buddy doesn't work" can mean the engine never downloaded, the switch is
+   * off, the microphone will not open, the room is quieter than the trigger, the
+   * words came back wrong, or the phrase matcher rejected them — and from the
+   * outside every one of those looks identical: nothing happens. Each step
+   * reports separately so the answer is visible rather than guessed at.
+   *
+   * @param {(step: string, state: 'run'|'ok'|'fail', detail?: string) => void} report
    */
-  async function micTest() {
-    if (!voiceInputAvailable()) throw new Error('Buddy has no way to listen right now.');
+  async function micTest(report) {
+    const say = (step, state, detail) => {
+      if (report) report(step, state, detail);
+    };
 
-    const LISTEN_MS = 7000;
-    let spoke = false;
-    /** Replaced below by the resolver, once there is a promise to settle. */
-    let finished = () => {};
+    // 1. is there anything to transcribe with?
+    say('engine', 'run');
+    await refreshRuntime();
+    if (runtime.providers.asr === 'off') {
+      say('engine', 'fail', 'Listening is set to off in the dropdown above.');
+      throw new Error('Listening is turned off.');
+    }
+    if (runtime.hearingReady === false) {
+      say('engine', 'fail', "Buddy's ears have not finished downloading yet.");
+      throw new Error('The transcription engine is not ready.');
+    }
+    say('engine', 'ok', runtime.providers.asr === 'local' ? 'Whisper, in the app' : runtime.providers.asr);
 
+    // 2. is the wake word even switched on?
+    say('enabled', wakeEnabled ? 'ok' : 'fail', wakeEnabled ? 'on' : 'Switch it on above — the mic test still works.');
+
+    // 3. can the microphone be opened at all?
+    say('mic', 'run');
+    let mic;
     const detector = createVoiceDetector({
-      onSpeechStart: () => {
-        spoke = true;
-      },
+      onSpeechStart: () => say('speech', 'ok', 'yes — keep talking'),
       onSpeechEnd: () => finished(),
     });
     detector.restart();
 
-    const mic = await openMicrophone({ onFrame: (_frame, rms) => detector.push(rms) });
+    let finished = () => {};
+    let peak = 0;
+    let spoke = false;
+
+    try {
+      mic = await openMicrophone({
+        onFrame: (_frame, rms) => {
+          peak = Math.max(peak, rms);
+          if (detector.push(rms)) spoke = true;
+          say('level', 'meter', JSON.stringify({ rms, level: detector.level(rms) }));
+        },
+      });
+    } catch (error) {
+      say('mic', 'fail', error.message);
+      throw new Error(`The microphone would not open: ${error.message}`);
+    }
+    say('mic', 'ok', `${Math.round(mic.sampleRate / 1000)} kHz`);
+    say('level', 'run', 'say “Hey Buddy” now');
+    say('speech', 'run');
+
     mic.beginClip(0);
 
     try {
+      // 4 & 5. wait for a stretch of speech, or give up.
       await new Promise((resolve) => {
-        // Whichever comes first: they finish a sentence, or the clock runs out.
-        const timer = setTimeout(resolve, LISTEN_MS);
+        const timer = setTimeout(resolve, 8000);
         finished = () => {
           clearTimeout(timer);
           resolve();
@@ -377,10 +417,36 @@ export function initPanel() {
       });
 
       const clip = mic.endClip();
-      if (!spoke || clip.length < mic.sampleRate * 0.3) return 'Heard nothing at all.';
+      say(
+        'level',
+        peak > 0.005 ? 'ok' : 'fail',
+        peak > 0.005 ? `peak ${peak.toFixed(3)}` : 'silence — is the right microphone selected?'
+      );
 
+      if (!spoke) {
+        say('speech', 'fail', `nothing crossed the trigger (floor ${detector.noiseFloor.toFixed(3)})`);
+        throw new Error('No speech was detected.');
+      }
+      if (clip.length < mic.sampleRate * 0.3) {
+        say('speech', 'fail', 'the clip was too short to send');
+        throw new Error('That clip was too short.');
+      }
+      say('speech', 'ok', `${(clip.length / mic.sampleRate).toFixed(1)}s captured`);
+
+      // 6. did it come back as words?
+      say('heard', 'run');
       const { text } = await api('/asr', { pcm: samplesToBase64(clip), sampleRate: mic.sampleRate });
-      return text && text.trim() ? `Heard: “${text.trim()}”` : 'Heard sound, but no words in it.';
+      const heard = (text || '').trim();
+      if (!heard) {
+        say('heard', 'fail', 'sound, but no words in it');
+        throw new Error('No words were recognised.');
+      }
+      say('heard', 'ok', `“${heard}”`);
+
+      // 7. and would that have woken Buddy?
+      const matched = isWakePhrase(heard);
+      say('match', matched ? 'ok' : 'fail', matched ? 'yes — this would wake Buddy' : 'not close enough to “Hey Buddy”');
+      return matched ? `Working. Heard “${heard}”.` : `Heard “${heard}”, which is not close enough to “Hey Buddy”.`;
     } finally {
       finished = () => {};
       await mic.close();

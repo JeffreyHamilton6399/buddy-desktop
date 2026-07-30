@@ -53,8 +53,23 @@ export async function openMicrophone({ onFrame } = {}) {
     },
   });
 
-  const context = new AudioContext({ sampleRate: SAMPLE_RATE });
+  /**
+   * Asking for a 16 kHz context is the convenient thing — it is Whisper's rate,
+   * so nothing has to be resampled — but some Windows audio drivers refuse a
+   * rate their device does not run at and throw. That threw away the whole
+   * microphone, and with it the wake word, for a reason nobody could see. So
+   * try it, and fall back to whatever rate the device does want.
+   */
+  let context = null;
+  try {
+    context = new AudioContext({ sampleRate: SAMPLE_RATE });
+  } catch {
+    context = null;
+  }
+  if (!context) context = new AudioContext();
   if (context.state === 'suspended') await context.resume();
+
+  const rate = context.sampleRate;
 
   try {
     await context.audioWorklet.addModule(WORKLET_URL);
@@ -74,7 +89,7 @@ export async function openMicrophone({ onFrame } = {}) {
   node.connect(sink);
   sink.connect(context.destination);
 
-  const ringLength = Math.ceil(SAMPLE_RATE * PRE_ROLL_SECONDS);
+  const ringLength = Math.ceil(rate * PRE_ROLL_SECONDS);
   const ring = new Float32Array(ringLength);
   let ringAt = 0;
   let ringFilled = 0;
@@ -106,7 +121,7 @@ export async function openMicrophone({ onFrame } = {}) {
 
   /** The last `seconds` of audio, oldest first. */
   function preRoll(seconds) {
-    const want = Math.min(ringFilled, Math.ceil(SAMPLE_RATE * seconds));
+    const want = Math.min(ringFilled, Math.ceil(rate * seconds));
     const out = new Float32Array(want);
     // Walk back from the write head, wrapping.
     const start = (ringAt - want + ringLength) % ringLength;
@@ -117,7 +132,8 @@ export async function openMicrophone({ onFrame } = {}) {
   }
 
   return {
-    sampleRate: SAMPLE_RATE,
+    /** The rate actually in use, which /asr resamples from when it is not 16 kHz. */
+    sampleRate: rate,
     get rms() {
       return latestRms;
     },
@@ -182,7 +198,7 @@ export async function openMicrophone({ onFrame } = {}) {
 export function createVoiceDetector({
   onSpeechStart,
   onSpeechEnd,
-  calibrationMs = 1200,
+  calibrationMs = 1500,
   sustainMs = 180,
   hangoverMs: initialHangoverMs = 650,
   maxClipMs: initialMaxClipMs = 5000,
@@ -193,7 +209,21 @@ export function createVoiceDetector({
   const FLOOR_FACTOR = 2.2;
   const FLOOR_MARGIN = 0.012;
   const MIN_THRESHOLD = 0.02;
+  /**
+   * A microphone is not immediately truthful. Bluetooth headsets in particular
+   * deliver near-silence for a moment while the link and the gain control settle,
+   * and calibrating across that measures a room far quieter than it is — which
+   * sets the trigger so low that ordinary noise counts as speech forever after.
+   * Throw the settling period away before measuring anything.
+   */
+  const SETTLE_MS = 400;
+  /**
+   * The 75th percentile rather than the median: the floor should sit above most
+   * of the room's noise, not in the middle of it.
+   */
+  const FLOOR_PERCENTILE = 0.75;
 
+  let settleEndsAt = 0;
   let calibrationEndsAt = 0;
   let floorSamples = [];
   let noiseFloor = 0.01;
@@ -234,7 +264,8 @@ export function createVoiceDetector({
     },
 
     restart() {
-      calibrationEndsAt = Date.now() + calibrationMs;
+      settleEndsAt = Date.now() + SETTLE_MS;
+      calibrationEndsAt = settleEndsAt + calibrationMs;
       floorSamples = [];
       loudSince = 0;
       quietSince = 0;
@@ -244,7 +275,13 @@ export function createVoiceDetector({
 
     /** Feed one frame. Returns true while it believes someone is talking. */
     push(rms, now = Date.now()) {
-      if (!calibrationEndsAt) calibrationEndsAt = now + calibrationMs;
+      if (!calibrationEndsAt) {
+        settleEndsAt = now + SETTLE_MS;
+        calibrationEndsAt = settleEndsAt + calibrationMs;
+      }
+
+      // Let the stream settle before believing anything it says.
+      if (now < settleEndsAt) return false;
 
       if (now < calibrationEndsAt) {
         floorSamples.push(rms);
@@ -252,7 +289,7 @@ export function createVoiceDetector({
       }
       if (floorSamples.length) {
         floorSamples.sort((a, b) => a - b);
-        noiseFloor = floorSamples[Math.floor(floorSamples.length * 0.5)] || 0.01;
+        noiseFloor = floorSamples[Math.floor(floorSamples.length * FLOOR_PERCENTILE)] || 0.01;
         floorSamples = [];
         calibrated = true;
       }
@@ -282,6 +319,20 @@ export function createVoiceDetector({
 
       if (speaking && now - startedAt >= maxClipMs) {
         speaking = false;
+        /**
+         * Nobody speaks for the entire maximum length. A clip that runs to the
+         * limit means the trigger is sitting below the room rather than above it
+         * — the state the wake word gets stuck in, listening to noise all day and
+         * never hearing its name inside it. Take the current level as evidence of
+         * where the floor really is and measure again.
+         */
+        noiseFloor = Math.max(noiseFloor, rms);
+        settleEndsAt = now;
+        calibrationEndsAt = now + calibrationMs;
+        floorSamples = [];
+        calibrated = false;
+        loudSince = 0;
+        quietSince = 0;
         if (onSpeechEnd) onSpeechEnd('too-long');
       }
       return speaking;
