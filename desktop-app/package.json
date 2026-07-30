@@ -1,6 +1,6 @@
 {
   "name": "buddy",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Buddy — a local-first AI companion that lives on your desktop",
   "main": "src/main.js",
   "author": "Jeffrey Hamilton",
