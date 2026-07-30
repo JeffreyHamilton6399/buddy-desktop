@@ -184,9 +184,18 @@ body.flat .orb-stage::before {
   z-index: 3;
 }
 
+/*
+ * Idle listening is deliberately invisible.
+ *
+ * The ring used to be green the whole time the microphone was open, and it
+ * pulsed at every noise in the room, so it was on almost permanently and told
+ * you nothing. Green now means one thing only: Buddy heard its name and is
+ * waiting for you. While it is merely listening for that name it looks exactly
+ * like it does at rest — the small dot below is the only hint, and the tooltip
+ * says so on hover.
+ */
 .orb-stage.hot .orb-ring {
-  opacity: 1;
-  border-color: rgba(52, 211, 153, 0.7);
+  opacity: 0;
 }
 
 /*
@@ -204,18 +213,15 @@ body.flat .orb-stage::before {
   z-index: 1;
 }
 
-.orb-stage.hot .orb-ripple {
-  animation: ripple 2.4s ease-out infinite;
-}
-
-/* While actually hearing a voice, the pulse quickens. */
+/*
+ * No ripple while merely waiting for the wake word, and none for ordinary room
+ * noise either. Both used to fire constantly, which made the orb restless on a
+ * desktop it is supposed to sit quietly on.
+ */
+.orb-stage.hot .orb-ripple,
 .orb-stage.hearing .orb-ripple {
-  animation-duration: 1.1s;
-  border-color: rgba(52, 211, 153, 0.85);
-}
-
-.orb-stage.hearing .orb-ring {
-  border-color: rgba(52, 211, 153, 0.95);
+  animation: none;
+  opacity: 0;
 }
 
 /*
@@ -285,14 +291,19 @@ body.flat .orb-stage::before {
   z-index: 4;
 }
 
+/*
+ * A small, still dot is the whole of the idle indicator: enough to answer "is it
+ * listening?" if you look for it, not enough to catch your eye when you are not.
+ */
 .orb-stage.hot .orb-dot {
-  opacity: 1;
-  transform: scale(1);
+  opacity: 0.5;
+  transform: scale(0.8);
 }
 
-.orb-stage.hearing .orb-dot {
-  background: var(--amber);
-  box-shadow: 0 0 10px rgba(251, 191, 36, 0.95);
+.orb-stage.asking .orb-dot,
+.orb-stage.thinking .orb-dot {
+  opacity: 1;
+  transform: scale(1);
 }
 
 /* Heard its name: one confident burst. */

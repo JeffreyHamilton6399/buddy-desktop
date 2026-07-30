@@ -18,6 +18,8 @@ const IDLE_UNLOAD_MS = 30 * 60 * 1000; // give the memory back if Buddy goes unu
 
 let llamaPromise = null;
 let loaded = null; // { llama, model, context, session, modelPath }
+let loadPromise = null; // in-flight load, shared by concurrent callers
+let loadingPath = null;
 let queue = Promise.resolve();
 let idleTimer = null;
 
@@ -43,24 +45,46 @@ function scheduleIdleUnload() {
   }, IDLE_UNLOAD_MS);
 }
 
-async function load(modelPath) {
-  if (loaded && loaded.modelPath === modelPath) return loaded;
-  if (loaded) await unload();
+/**
+ * Loading is memoised while it is in flight.
+ *
+ * Two things now ask for the model at once — the server warms it at startup, and
+ * the orb asks it to warm the moment listening begins. Without this both saw
+ * `loaded` still empty, and both loaded a gigabyte of weights: twice the wait and
+ * twice the memory, with the first copy abandoned.
+ */
+function load(modelPath) {
+  if (loaded && loaded.modelPath === modelPath) return Promise.resolve(loaded);
+  if (loadPromise && loadingPath === modelPath) return loadPromise;
 
-  const llama = await getLlama();
-  const startedAt = Date.now();
-  const model = await llama.loadModel({ modelPath });
-  const context = await model.createContext({ contextSize: CONTEXT_SIZE });
+  loadingPath = modelPath;
+  loadPromise = (async () => {
+    if (loaded) await unload();
 
-  const mod = await import('node-llama-cpp');
-  const session = new mod.LlamaChatSession({ contextSequence: context.getSequence() });
+    const llama = await getLlama();
+    const startedAt = Date.now();
+    const model = await llama.loadModel({ modelPath });
+    const context = await model.createContext({ contextSize: CONTEXT_SIZE });
 
-  loaded = { llama, model, context, session, modelPath, LlamaChatSession: mod.LlamaChatSession };
-  console.log(
-    `[buddy] model loaded in ${((Date.now() - startedAt) / 1000).toFixed(1)}s ` +
-      `(${(model.size / 1073741824).toFixed(2)} GB, ${llama.gpu || 'cpu'})`
-  );
-  return loaded;
+    const mod = await import('node-llama-cpp');
+    const session = new mod.LlamaChatSession({ contextSequence: context.getSequence() });
+
+    loaded = { llama, model, context, session, modelPath, LlamaChatSession: mod.LlamaChatSession };
+    console.log(
+      `[buddy] model loaded in ${((Date.now() - startedAt) / 1000).toFixed(1)}s ` +
+        `(${(model.size / 1073741824).toFixed(2)} GB, ${llama.gpu || 'cpu'})`
+    );
+    return loaded;
+  })();
+
+  loadPromise
+    .catch(() => {})
+    .finally(() => {
+      loadPromise = null;
+      loadingPath = null;
+    });
+
+  return loadPromise;
 }
 
 async function unload() {
@@ -68,6 +92,7 @@ async function unload() {
   idleTimer = null;
   const current = loaded;
   loaded = null;
+  loadingPath = null;
   if (!current) return;
   try {
     await current.context.dispose();

@@ -26,11 +26,24 @@ const ACTIONS = {
   open_url: {
     summary: 'open a web page',
     validate(argument) {
+      const raw = String(argument || '').trim();
       let url;
       try {
-        url = new URL(argument);
+        url = new URL(raw);
       } catch {
-        return { ok: false, error: 'that is not a web address' };
+        // Models write "youtube.com", or just "youtube", far more often than a
+        // full address. Anything that looks like a hostname gets https:// put on
+        // the front; anything that does not is still refused, so this widens what
+        // is understood without widening what is allowed.
+        const host = raw.replace(/^\/+/, '');
+        if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(\/.*)?$/i.test(host)) {
+          return { ok: false, error: 'that is not a web address' };
+        }
+        try {
+          url = new URL(`https://${host}`);
+        } catch {
+          return { ok: false, error: 'that is not a web address' };
+        }
       }
       // Only the two schemes a browser should be handed. Anything else — file,
       // javascript, data — is a way of reaching something that is not a web page.
@@ -91,11 +104,23 @@ const ACTION_INSTRUCTIONS =
   '  [[search_web: WORDS TO SEARCH FOR]]\n' +
   '  [[open_folder: models]]   (or chats, or config)\n' +
   '\n' +
+  // These stay as a labelled dialogue. Rewriting them as prose ("Asked to open
+  // the BBC website, write:") dropped the model from five hits in six to one:
+  // it started answering with a bare URL and no marker at all. The labels leak
+  // into the odd reply, which extractAction strips; that is the cheaper problem.
   'Examples of exactly what to write:\n' +
   '\n' +
   'User: open the BBC website\n' +
   'You: Opening it now.\n' +
   '[[open_url: https://www.bbc.co.uk]]\n' +
+  '\n' +
+  'User: open youtube\n' +
+  'You: Opening YouTube.\n' +
+  '[[open_url: https://www.youtube.com]]\n' +
+  '\n' +
+  'User: open a new tab with youtube in it\n' +
+  'You: Opening YouTube.\n' +
+  '[[open_url: https://www.youtube.com]]\n' +
   '\n' +
   'User: look up tide times for me\n' +
   'You: Searching for that.\n' +
@@ -105,7 +130,31 @@ const ACTION_INSTRUCTIONS =
   'You: The capital of France is Paris.\n' +
   '\n' +
   'That last one has no marker because nothing needed opening. Put the marker on ' +
-  'its own line at the very end, and never write more than one.';
+  'its own line at the very end, and never write more than one.\n' +
+  '\n' +
+  'You cannot choose which browser is used — pages open in whichever one this ' +
+  'computer uses by default. If asked for a particular browser, open the page ' +
+  'anyway and say which browser it will actually use.';
+
+/**
+ * Does this message plausibly ask Buddy to *do* something?
+ *
+ * The instructions above cost more than they look. Handed to Llama 3.2 1B on
+ * every turn, they crowd out the actual job: asked "what is 2+2?" it opened
+ * Google, and asked for the capital of France it suggested searching online
+ * rather than answering. A larger model holds both at once; this one cannot, so
+ * it is only given the second job when the message looks like it needs it.
+ *
+ * A miss here is cheap — the message is answered normally, and asking again in
+ * plainer words works. A false positive is the expensive one, so the list is
+ * verbs about opening and searching rather than anything vaguer.
+ */
+const REQUEST_PATTERN =
+  /\b(open|opens|opening|launch|start up|go to|goto|visit|browse|pull up|bring up|take me to|show me|search|searching|look up|lookup|google|duckduckgo|find me|download)\b/i;
+
+function looksLikeRequest(text) {
+  return REQUEST_PATTERN.test(String(text || ''));
+}
 
 /**
  * Names a model reaches for instead of the real ones. Mapping them is not a
@@ -133,8 +182,17 @@ const ALIASES = {
  * @returns {{ reply: string, action: null|{ name: string, value: string, description: string },
  *             refused: null|string }}
  */
+/**
+ * The examples above are a labelled dialogue, and a small model sometimes copies
+ * the label — answering "You: Searching for that." Strip it rather than lose the
+ * examples, which are what make the feature work at all.
+ */
+function stripSpeakerLabel(text) {
+  return text.replace(/^\s*(?:you|assistant|buddy)\s*:\s*/i, '');
+}
+
 function extractAction(reply) {
-  const text = String(reply || '');
+  const text = stripSpeakerLabel(String(reply || ''));
   // Accept `[[name: arg]]`, `[[name | arg]]` and `[[action: name | arg]]`, since
   // which of those a model produces is largely luck.
   const pattern = /\[\[\s*(?:action\s*[:|]\s*)?([a-z_]+)\s*[:|]\s*([\s\S]*?)\s*\]\]/i;
@@ -172,4 +230,4 @@ function extractAction(reply) {
   };
 }
 
-module.exports = { ACTIONS, ACTION_NAMES, ACTION_INSTRUCTIONS, extractAction };
+module.exports = { ACTIONS, ACTION_NAMES, ACTION_INSTRUCTIONS, extractAction, looksLikeRequest };

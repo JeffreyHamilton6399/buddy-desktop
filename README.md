@@ -68,8 +68,15 @@ answers, because the whole sentence was already transcribed.
 
 Spoken answers are deliberately short: a sentence or two of plain speech, no lists and no markdown.
 Every extra sentence is another second of synthesis before you hear anything and several more you
-have to sit through. The exchange is saved to your conversations like any other, so clicking the orb
-afterwards shows what was said.
+have to sit through.
+
+**What you say out loud goes into the same conversation as what you type.** The orb and the panel
+share one thread, so you can ask something across the room, open the panel later, and scroll back
+through all of it — spoken and typed together, in order.
+
+While it is only listening for its name the orb shows **nothing but a small dim dot**. It used to
+wear a green ring the whole time and pulse at every noise in the room, which meant it was lit almost
+permanently and told you nothing. Green now means one thing: it heard you.
 
 It works by detecting speech locally (Web Audio RMS against a measured noise floor) and then
 transcribing a short clip to check whether you really said the name. **Where that clip goes depends
@@ -129,7 +136,7 @@ Click **Buddy's own name and orb** in the top-left of the panel. Five sections d
 | --- | --- |
 | **Brain** | Every model Buddy can download itself, with sizes and what each is good for. One tap to switch, one to delete a model you are done with. Any models a running Ollama has pulled appear here too. |
 | **Voice** | Which engine speaks, which of Kokoro's 28 voices, how fast, and a **Hear it** button to audition before committing. |
-| **Hearing** | The “Hey Buddy” switch, which transcriber to use, and **Test the microphone** — it records you and prints back what it heard. |
+| **Hearing** | The “Hey Buddy” switch, which transcriber to use, whether Buddy may open things, and **Test “Hey Buddy”** — it walks the whole chain and marks the step that failed. |
 | **Chats** | Whether conversations are kept, how many there are, and delete-everything. |
 | **About** | Which engine is doing each job and whether it is local, so the privacy claim is checkable rather than asserted. |
 
@@ -294,7 +301,7 @@ What the orb is telling you:
 | Orb | Meaning |
 | --- | --- |
 | Slow breathing glow | Idle |
-| Green ring and dot, gentle ripple | Mic is hot, listening for its name |
+| A small dim dot, nothing else | Mic is hot, listening for its name |
 | One bright pulse | It heard its name |
 | **Bright green ring, quick ripple, swelling with your voice** | **It is listening to your question** |
 | Steady dim ring, orb breathing quickly | Thinking |

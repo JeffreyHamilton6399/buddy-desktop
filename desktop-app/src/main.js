@@ -67,6 +67,8 @@ let wakeEnabled = true;
 let quitting = false;
 let setupCompleted = false;
 let dragTimer = null;
+/** The conversation the orb and the panel are both working in. */
+let activeChatId = null;
 
 // ── persisted state ───────────────────────────────────────────────────────
 
@@ -617,6 +619,34 @@ function registerIpc() {
 
   ipcMain.on('buddy:runtime-changed', () => {
     eachRenderer((window) => window.webContents.send('buddy:runtime-changed'));
+  });
+
+  /**
+   * Which conversation is "the current one", shared between the orb and the panel.
+   *
+   * Without this they each kept their own, so anything said out loud went into a
+   * separate conversation from anything typed — you would ask Buddy something,
+   * open the panel, and find no trace of it. The orb starts a spoken exchange in
+   * whatever the panel is showing, and the panel follows when the orb moves on.
+   */
+  ipcMain.on('buddy:set-active-chat', (event, id) => {
+    activeChatId = typeof id === 'string' && id ? id : null;
+    eachRenderer((window) => {
+      // Do not echo back to whoever just said so.
+      if (window.webContents.id !== event.sender.id) {
+        window.webContents.send('buddy:active-chat', activeChatId);
+      }
+    });
+  });
+
+  ipcMain.handle('buddy:get-active-chat', () => activeChatId);
+
+  ipcMain.on('buddy:chat-updated', (event, id) => {
+    eachRenderer((window) => {
+      if (window.webContents.id !== event.sender.id) {
+        window.webContents.send('buddy:chat-updated', typeof id === 'string' ? id : null);
+      }
+    });
   });
 
   ipcMain.on('buddy:setup-complete', () => {

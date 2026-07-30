@@ -656,7 +656,13 @@ async function handleChat(req, res) {
   // The model only ever sees the tail of the conversation, however long it gets.
   const context = conversation.messages.slice(-CONTEXT_MESSAGES).map(({ role, content }) => ({ role, content }));
   const basePrompt = spoken ? SYSTEM_PROMPT_VOICE : SYSTEM_PROMPT;
-  const prompt = settings.allowActions ? `${basePrompt}\n\n${actions.ACTION_INSTRUCTIONS}` : basePrompt;
+
+  // Only hand over the action instructions when the last thing said looks like a
+  // request to do something — see looksLikeRequest for why carrying them on every
+  // turn makes a small model markedly worse at ordinary conversation.
+  const lastSaid = [...conversation.messages].reverse().find((message) => message.role === 'user');
+  const wantsAction = settings.allowActions && actions.looksLikeRequest(lastSaid && lastSaid.content);
+  const prompt = wantsAction ? `${basePrompt}\n\n${actions.ACTION_INSTRUCTIONS}` : basePrompt;
   const messages = [{ role: 'system', content: prompt }, ...context];
 
   let completion;
@@ -690,9 +696,7 @@ async function handleChat(req, res) {
 
   // Only look for an action when the user has allowed them; otherwise the
   // syntax is just text, and text is all it stays.
-  const parsed = settings.allowActions
-    ? actions.extractAction(raw)
-    : { reply: raw, action: null, refused: null };
+  const parsed = wantsAction ? actions.extractAction(raw) : { reply: raw, action: null, refused: null };
 
   // What goes in the history is what was said, not the machinery. A model that
   // writes nothing but the marker — which the small one usually does, having been

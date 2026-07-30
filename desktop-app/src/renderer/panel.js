@@ -31,6 +31,17 @@ export function initPanel() {
 
   let sessionId = null;
   let busy = false;
+
+  /**
+   * Keep the orb pointed at the same conversation. Both windows talk to the
+   * server independently, so without this the spoken half and the typed half of
+   * the same conversation end up in two different files.
+   */
+  function setSession(id) {
+    if (id === sessionId) return;
+    sessionId = id || null;
+    window.buddy.setActiveChat(sessionId);
+  }
   let speakerOn = localStorage.getItem('buddy:speaker') !== 'off';
   let microphone = null;
   let recording = false;
@@ -114,7 +125,7 @@ export function initPanel() {
     try {
       const payload = await api('/chat', { messages: [{ role: 'user', content }], sessionId });
       typingRow.remove();
-      sessionId = payload.sessionId || sessionId;
+      setSession(payload.sessionId || sessionId);
       addMessage('buddy', payload.reply, { markdown: true });
       setBusy(false);
       setStatus('online');
@@ -219,7 +230,7 @@ export function initPanel() {
         try {
           await api(`/chats/${chat.id}`, undefined, { method: 'DELETE' });
           if (chat.id === sessionId) {
-            sessionId = null;
+            setSession(null);
             greet();
           }
           await openDrawer();
@@ -257,7 +268,7 @@ export function initPanel() {
     try {
       const { chat } = await api(`/chats/${id}`);
       speaker.stop();
-      sessionId = chat.id;
+      setSession(chat.id);
       messages.replaceChildren();
       for (const message of chat.messages) {
         if (message.role === 'assistant') addMessage('buddy', message.content, { markdown: true });
@@ -521,7 +532,7 @@ export function initPanel() {
     speaker.stop();
     stopRecording({ send: false });
     // The old conversation is already on disk; starting fresh just detaches it.
-    sessionId = null;
+    setSession(null);
     closeDrawer();
     settings.close();
     greet();
@@ -559,6 +570,23 @@ export function initPanel() {
   window.buddy.onRuntimeChanged(async () => {
     await refreshRuntime();
     applyVoiceInputAvailability();
+  });
+
+  /**
+   * The orb answered something out loud. Show it here too — that exchange is
+   * part of the same conversation, and the point of saying it in the chat is
+   * that you can scroll back through everything, not just the typed half.
+   */
+  window.buddy.onChatUpdated(async (id) => {
+    if (!id) return;
+    // A spoken exchange may have started the conversation the panel is now in.
+    if (!sessionId) sessionId = id;
+    if (id !== sessionId || busy) return;
+    await loadConversation(id);
+  });
+
+  window.buddy.onActiveChat((id) => {
+    if (id && !sessionId) sessionId = id;
   });
 
   updateSpeakerButton();

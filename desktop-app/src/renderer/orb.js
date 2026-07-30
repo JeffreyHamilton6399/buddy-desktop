@@ -135,8 +135,11 @@ export function initOrb() {
    */
   let mode = 'wake';
   let questionTimer = null;
-  /** Keeps a spoken exchange in the same conversation as its follow-ups. */
-  let voiceSessionId = null;
+  /**
+   * The conversation both windows are working in, so what you say out loud is
+   * waiting in the panel when you open it rather than filed somewhere separate.
+   */
+  let activeChatId = null;
 
   const speaker = createSpeaker({
     onStart: () => stage.classList.add('answering'),
@@ -280,10 +283,16 @@ export function initOrb() {
     try {
       const payload = await api('/chat', {
         messages: [{ role: 'user', content: question }],
-        sessionId: voiceSessionId,
+        sessionId: activeChatId,
         voice: true,
       });
-      voiceSessionId = payload.sessionId || voiceSessionId;
+
+      if (payload.sessionId && payload.sessionId !== activeChatId) {
+        activeChatId = payload.sessionId;
+        window.buddy.setActiveChat(activeChatId);
+      }
+      // Tell the panel to re-read it, so opening it shows what was just said.
+      window.buddy.notifyChatUpdated(activeChatId);
 
       const reply = String(payload.reply || '').trim();
       if (!reply) return backToWaiting();
@@ -354,7 +363,9 @@ export function initOrb() {
   function paintLevel() {
     levelFrame = requestAnimationFrame(paintLevel);
     if (!microphone || !detector) return;
-    const value = listening() ? detector.level(microphone.rms) : 0;
+    // Only swell to a voice once Buddy is actually waiting for one. Reacting to
+    // every noise while idle is what made the orb feel permanently busy.
+    const value = mode === 'question' && listening() ? detector.level(microphone.rms) : 0;
     level.style.setProperty('--level', value.toFixed(3));
   }
 
@@ -402,7 +413,8 @@ export function initOrb() {
 
     starting = false;
     refreshHotState();
-    showToast('Listening');
+    // No announcement: switching the microphone on is not news, and the toast
+    // appeared every time the panel closed.
     if (!levelFrame) paintLevel();
   }
 
@@ -497,6 +509,15 @@ export function initOrb() {
     if (wakeEnabled && voiceInputAvailable() && !microphone) startListening();
     else if (!voiceInputAvailable() && microphone) stopListening();
     refreshHotState();
+  });
+
+  window.buddy.onActiveChat((id) => {
+    activeChatId = id || null;
+  });
+
+  // Pick up whichever conversation the panel already has open.
+  window.buddy.getActiveChat().then((id) => {
+    if (id) activeChatId = id;
   });
 
   panelVisible = boot.panelVisible;

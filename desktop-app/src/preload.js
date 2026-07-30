@@ -33,7 +33,17 @@ contextBridge.exposeInMainWorld('buddy', {
   /** Settings changed somewhere; every window should re-read the runtime. */
   notifyRuntimeChanged: () => ipcRenderer.send('buddy:runtime-changed'),
 
+  /**
+   * The conversation the orb and the panel share, so a spoken exchange and a
+   * typed one end up in the same place.
+   */
+  setActiveChat: (id) => ipcRenderer.send('buddy:set-active-chat', id || null),
+  getActiveChat: () => ipcRenderer.invoke('buddy:get-active-chat'),
+  notifyChatUpdated: (id) => ipcRenderer.send('buddy:chat-updated', id || null),
+
   onWakeToggled: (handler) => subscribe('buddy:wake-toggled', handler),
   onPanelVisibility: (handler) => subscribe('buddy:panel-visibility', handler),
   onRuntimeChanged: (handler) => subscribe('buddy:runtime-changed', handler),
+  onActiveChat: (handler) => subscribe('buddy:active-chat', handler),
+  onChatUpdated: (handler) => subscribe('buddy:chat-updated', handler),
 });
