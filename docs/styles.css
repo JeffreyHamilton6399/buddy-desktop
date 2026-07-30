@@ -149,19 +149,41 @@ code {
 /* ── intro ───────────────────────────────────────────────────────────────── */
 
 .intro {
-  padding: 92px 24px 76px;
+  padding: 104px 24px 60px;
 }
 
 .intro h1 {
-  font-size: clamp(30px, 5.4vw, 42px);
-  margin-bottom: 22px;
+  font-size: clamp(31px, 5.4vw, 43px);
+  letter-spacing: -0.032em;
+  line-height: 1.12;
+  margin-bottom: 20px;
 }
 
 .lede {
   color: var(--muted);
   font-size: 17px;
-  line-height: 1.62;
+  line-height: 1.6;
   margin-bottom: 30px;
+  max-width: 34em;
+}
+
+/* ── product shot ────────────────────────────────────────────────────────── */
+
+.shot {
+  margin: 0;
+  padding: 8px 24px 76px;
+  display: flex;
+  justify-content: center;
+}
+
+.shot img {
+  width: 100%;
+  max-width: 340px;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  /* Enough shadow to lift it off the page, not enough to be the point. */
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.9);
 }
 
 .actions {
@@ -195,6 +217,19 @@ code {
 .btn:hover {
   background: var(--hover);
   border-color: rgba(255, 255, 255, 0.24);
+}
+
+/* The one call to action worth making obvious. */
+.btn-solid {
+  background: var(--text);
+  border-color: var(--text);
+  color: #0a0a0b;
+  font-weight: 580;
+}
+
+.btn-solid:hover {
+  background: #fff;
+  border-color: #fff;
 }
 
 /* ── content blocks ──────────────────────────────────────────────────────── */
@@ -347,6 +382,23 @@ tbody tr:last-child td {
 
 .dl-alt:hover {
   color: var(--text);
+}
+
+/*
+ * The row matching the visitor gets the solid button. Making all three solid
+ * would be three shouts; making none of them solid leaves the page's strongest
+ * button on a link that merely scrolls down to here.
+ */
+.dl-card.is-yours .btn {
+  background: var(--text);
+  border-color: var(--text);
+  color: #0a0a0b;
+  font-weight: 580;
+}
+
+.dl-card.is-yours .btn:hover {
+  background: #fff;
+  border-color: #fff;
 }
 
 /* The platform the visitor is on, marked rather than chosen for them. */
