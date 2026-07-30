@@ -34,7 +34,12 @@ const ASR_PROVIDERS = ['local', 'whisper', 'z-ai', 'off'];
 const DEFAULTS = {
   chat: { provider: 'builtin', model: '', builtinModel: '', baseUrl: 'http://127.0.0.1:11434' },
   tts: { provider: 'kokoro', voice: '', speed: 1 },
-  asr: { provider: 'local', baseUrl: 'http://127.0.0.1:8000/v1', model: 'Systran/faster-whisper-small' },
+  asr: {
+    provider: 'local',
+    baseUrl: 'http://127.0.0.1:8000/v1',
+    model: 'Systran/faster-whisper-small',
+    localModel: 'tiny.en',
+  },
   saveHistory: true,
   // Buddy reaching outside its own window is opt-in, always.
   allowActions: false,
@@ -102,6 +107,8 @@ function normaliseSettings(raw) {
       provider: pick(asr.provider, ASR_PROVIDERS, DEFAULTS.asr.provider),
       baseUrl: text(asr.baseUrl, DEFAULTS.asr.baseUrl).replace(/\/+$/, ''),
       model: text(asr.model, DEFAULTS.asr.model),
+      // Which size of the in-app Whisper to use; validated by hearing.js.
+      localModel: text(asr.localModel, DEFAULTS.asr.localModel),
     },
     saveHistory: input.saveHistory !== false,
     // Defaults to false rather than true: this one has to be asked for.

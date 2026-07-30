@@ -273,6 +273,21 @@ export function createVoiceDetector({
       calibrated = false;
     },
 
+    /**
+     * Forget what is being said without forgetting the room.
+     *
+     * restart() re-measures, which costs the best part of two seconds of being
+     * completely deaf. That is right when the microphone has just opened and
+     * wrong the rest of the time — notably when Buddy has finished saying hello
+     * and is about to listen for the actual question, which is the exact moment
+     * someone starts talking.
+     */
+    reset() {
+      loudSince = 0;
+      quietSince = 0;
+      speaking = false;
+    },
+
     /** Feed one frame. Returns true while it believes someone is talking. */
     push(rms, now = Date.now()) {
       if (!calibrationEndsAt) {

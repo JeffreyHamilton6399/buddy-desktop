@@ -362,7 +362,8 @@ function describeRuntime() {
   const settings = readSettings();
   const modelId = activeModelId(settings);
   const voiceReady = voice.isReady(configDir());
-  const hearingReady = hearing.isReady(configDir());
+  const localWhisper = hearing.resolveModel(settings.asr.localModel);
+  const hearingReady = hearing.isReady(configDir(), localWhisper);
 
   return {
     ok: true,
@@ -383,6 +384,8 @@ function describeRuntime() {
     ttsVoice: settings.tts.voice || voice.DEFAULT_VOICE,
     ttsSpeed: settings.tts.speed,
     asrBaseUrl: settings.asr.baseUrl,
+    asrLocalModel: localWhisper,
+    asrLocalModels: Object.entries(hearing.MODELS).map(([id, entry]) => ({ id, label: entry.label })),
     greeting: voice.GREETING,
     // Whether each capability can actually run right now, which is what decides
     // if the UI offers a microphone and whether the orb may listen at all.
@@ -532,7 +535,7 @@ async function handleRemoveModel(_req, res, [id]) {
 async function handleSpeechState(_req, res) {
   return sendJson(res, 200, {
     voice: { ...voice.snapshot(), ready: voice.isReady(configDir()), loaded: voice.isLoaded() },
-    hearing: { ...hearing.snapshot(), ready: hearing.isReady(configDir()), loaded: hearing.isLoaded() },
+    hearing: { ...hearing.snapshot(), ready: hearing.isReady(configDir(), readSettings().asr.localModel), loaded: hearing.isLoaded() },
   });
 }
 
@@ -552,13 +555,13 @@ async function handleSpeechDownload(req, res) {
     });
   }
   if (want === 'hearing' || want === 'both') {
-    hearing.warmUp(configDir()).catch(() => {
+    hearing.warmUp(configDir(), settings.asr.localModel).catch(() => {
       /* as above */
     });
   }
   return sendJson(res, 202, {
     voice: { ...voice.snapshot(), ready: voice.isReady(configDir()) },
-    hearing: { ...hearing.snapshot(), ready: hearing.isReady(configDir()) },
+    hearing: { ...hearing.snapshot(), ready: hearing.isReady(configDir(), settings.asr.localModel) },
   });
 }
 
@@ -581,8 +584,8 @@ async function warmEverything() {
   if (providers.usesLocalVoice(settings) && voice.isReady(configDir())) {
     jobs.push(voice.warmUp(configDir(), { greetingVoice: settings.tts.voice || undefined }));
   }
-  if (providers.usesLocalHearing(settings) && hearing.isReady(configDir())) {
-    jobs.push(hearing.warmUp(configDir()));
+  if (providers.usesLocalHearing(settings) && hearing.isReady(configDir(), settings.asr.localModel)) {
+    jobs.push(hearing.warmUp(configDir(), settings.asr.localModel));
   }
 
   // Never let a warm-up failure surface as a request error; the real call will
@@ -846,7 +849,7 @@ async function handleAsr(req, res) {
         error: "Buddy's own ears need raw samples — send pcm rather than an encoded clip.",
       });
     }
-    if (!hearing.isReady(configDir())) {
+    if (!hearing.isReady(configDir(), settings.asr.localModel)) {
       return sendJson(res, 503, {
         error: "Buddy's hearing is still downloading.",
         needsSpeech: true,
@@ -856,6 +859,7 @@ async function handleAsr(req, res) {
     const text = await hearing.transcribe({
       configDir: configDir(),
       samples: audio.resample(samples, sampleRate, hearing.SAMPLE_RATE),
+      model: settings.asr.localModel,
     });
     return sendJson(res, 200, { text });
   }
@@ -1075,7 +1079,9 @@ function start(options = {}) {
         `    hearing  ${settings.asr.provider} (${where(settings.asr.provider)})` +
           (settings.asr.provider === 'whisper' ? ` · ${settings.asr.baseUrl}` : '') +
           (settings.asr.provider === 'local'
-            ? ` · ${hearing.isReady(configDir()) ? 'ready' : 'NOT downloaded yet'}`
+            ? ` · ${settings.asr.localModel} · ${
+                hearing.isReady(configDir(), settings.asr.localModel) ? 'ready' : 'NOT downloaded yet'
+              }`
             : '')
       );
       console.log(

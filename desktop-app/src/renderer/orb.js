@@ -256,7 +256,10 @@ export function initOrb() {
     setMode('wake');
     if (detector) {
       detector.configure({ hangoverMs: WAKE_HANGOVER_MS, maxClipMs: WAKE_CLIP_MS });
-      detector.restart();
+      // reset rather than restart, again: the room is the same room it was
+      // before the exchange, and re-measuring would leave Buddy deaf for the
+      // two seconds immediately after it finishes speaking.
+      detector.reset();
     }
     refreshHotState();
   }
@@ -269,12 +272,27 @@ export function initOrb() {
     if (detector) {
       // Room to finish a sentence, and to pause in the middle of one.
       detector.configure({ hangoverMs: 950, maxClipMs: QUESTION_MAX_MS });
-      detector.restart();
+      // reset, not restart: the room was measured when the microphone opened, and
+      // re-measuring here would spend the first two seconds of the answer deaf.
+      detector.reset();
     }
+    waitForQuestion();
+  }
 
+  /**
+   * Give up if nothing is said — but never in the middle of a sentence.
+   *
+   * A fixed timer expiring mid-question was worse than useless: it put the orb
+   * back into wake mode, so when the sentence finally ended the recording was
+   * checked against "hey buddy", failed, and was thrown away. From outside that
+   * looks exactly like Buddy listening far too long and then ignoring you.
+   */
+  function waitForQuestion() {
     clearTimeout(questionTimer);
     questionTimer = setTimeout(() => {
       if (mode !== 'question') return;
+      // Still talking — keep listening rather than discarding what they said.
+      if (detector && detector.speaking) return waitForQuestion();
       hideToast();
       backToWaiting();
     }, QUESTION_WINDOW_MS);
@@ -325,12 +343,21 @@ export function initOrb() {
 
     // ── already awake: this clip is the question ──
     if (mode === 'question') {
+      const seconds = samples.length / (microphone ? microphone.sampleRate : 16000);
       let question = '';
       try {
         question = await transcribe(samples);
       } catch (error) {
         console.warn('[buddy] could not transcribe the question:', error.message);
+        window.buddy.reportHeard({ seconds, text: '', matched: false, note: `question: ${error.message}` });
+        hideToast();
+        return backToWaiting();
       }
+      // Recorded like a wake attempt, so a question that was heard but not
+      // understood shows up somewhere rather than vanishing. Tagged as a question
+      // rather than a match — marking these "woke" made every line in the list
+      // green and hid which one had actually been the wake phrase.
+      window.buddy.reportHeard({ seconds, text: question, matched: false, kind: 'question' });
       if (!question) {
         hideToast();
         return backToWaiting();

@@ -659,6 +659,7 @@ function registerIpc() {
       seconds: Number(entry.seconds) || 0,
       text: typeof entry.text === 'string' ? entry.text.slice(0, 200) : '',
       matched: Boolean(entry.matched),
+      kind: entry.kind === 'question' ? 'question' : 'wake',
       note: typeof entry.note === 'string' ? entry.note.slice(0, 120) : '',
     });
     recentlyHeard.length = Math.min(recentlyHeard.length, 8);

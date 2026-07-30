@@ -362,6 +362,21 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   function applyHearingPanes() {
     $('asr-provider').value = runtime.providers.asr;
     $('whisper-options').hidden = runtime.providers.asr !== 'whisper';
+
+    // Which size of the in-app Whisper. Only relevant when that is what is listening.
+    const localOptions = $('local-whisper-options');
+    localOptions.hidden = runtime.providers.asr !== 'local';
+    const sizes = runtime.asrLocalModels || [];
+    const select = $('asr-local-model');
+    if (sizes.length && select.options.length !== sizes.length) {
+      select.replaceChildren(...sizes.map((entry) => new Option(entry.label, entry.id)));
+    }
+    if (runtime.asrLocalModel) select.value = runtime.asrLocalModel;
+    $('asr-local-note').textContent =
+      runtime.asrLocalModel === 'tiny.en'
+        ? 'If Buddy keeps mishearing you, the larger model is worth a try — a 73 MB download, and slower per phrase. On a synthetic headset-quality test here the two scored the same, so it is not a guaranteed fix.'
+        : 'The larger model. Switch back to Faster if replies feel sluggish.';
+
     $('allow-actions').checked = Boolean(runtime.allowActions);
     applyActionsNote();
     const wake = $('wake-toggle');
@@ -376,6 +391,21 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       applyHearingPanes();
       renderAssets();
     }
+  });
+
+  $('asr-local-model').addEventListener('change', async (event) => {
+    const size = event.target.value;
+    if (!(await save({ asr: { localModel: size } }))) return;
+    await refreshRuntime();
+    applyHearingPanes();
+    renderAssets();
+    // Switching to a size that is not on disk means a download, so say so rather
+    // than leaving the wake word quietly broken until it finishes.
+    setNote(
+      runtime.hearingReady === false
+        ? 'Downloading the more accurate model — listening resumes when it lands.'
+        : 'Switched. The next thing you say uses it.'
+    );
   });
 
   $('whisper-url').addEventListener('change', async (event) => {
@@ -464,7 +494,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
 
       const tag = document.createElement('span');
       tag.className = 'heard-tag';
-      tag.textContent = entry.matched ? 'woke' : `${entry.seconds.toFixed(1)}s`;
+      tag.textContent = entry.matched ? 'woke' : entry.kind === 'question' ? 'question' : `${entry.seconds.toFixed(1)}s`;
 
       row.append(when, what, tag);
       list.appendChild(row);
