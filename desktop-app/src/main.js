@@ -476,6 +476,22 @@ function createTray() {
   tray.on('click', () => togglePanel());
 }
 
+/**
+ * Windows does not remove a tray icon when its owner disappears — it leaves the
+ * dead icon in the notification area until something makes the shell re-check
+ * it, which is why a few unclean exits leave a row of identical ghosts. Tearing
+ * the tray down explicitly means a normal quit never contributes one.
+ */
+function destroyTray() {
+  if (!tray) return;
+  try {
+    if (!tray.isDestroyed()) tray.destroy();
+  } catch {
+    /* already gone */
+  }
+  tray = null;
+}
+
 // ── wake word / panel state fan-out ───────────────────────────────────────
 
 function eachRenderer(callback) {
@@ -658,7 +674,13 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
     stopDrag();
+    destroyTray();
   });
+
+  // A crash or a kill cannot be helped, but every exit we do control should
+  // leave the notification area as it found it.
+  app.on('will-quit', destroyTray);
+  process.on('exit', destroyTray);
 
   app.on('activate', () => {
     if (orbWindow && !orbWindow.isDestroyed()) orbWindow.showInactive();
