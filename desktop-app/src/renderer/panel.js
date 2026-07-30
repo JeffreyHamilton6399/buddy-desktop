@@ -465,13 +465,6 @@ export function initPanel() {
     settings.syncWake(wakeEnabled);
   });
 
-  // "Hey Buddy, what time is it" — the orb already heard the question.
-  window.buddy.onWakeQuestion((text) => {
-    closeDrawer();
-    settings.close();
-    send(text);
-  });
-
   window.buddy.onRuntimeChanged(async () => {
     await refreshRuntime();
     applyVoiceInputAvailability();

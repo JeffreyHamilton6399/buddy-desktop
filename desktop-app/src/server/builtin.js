@@ -94,10 +94,10 @@ function toChatHistory(messages) {
 }
 
 /**
- * @param {{ modelPath: string, messages: Array<{role: string, content: string}> }} options
+ * @param {{ modelPath: string, messages: Array<{role: string, content: string}>, maxTokens?: number }} options
  * @returns {Promise<{ message: { role: string, content: string } }>} an Ollama-shaped reply
  */
-function chat({ modelPath, messages }) {
+function chat({ modelPath, messages, maxTokens }) {
   // One context, one conversation at a time.
   const run = queue.then(async () => {
     const { session } = await load(modelPath);
@@ -116,7 +116,7 @@ function chat({ modelPath, messages }) {
 
     session.setChatHistory(history);
     const reply = await session.prompt(prompt, {
-      maxTokens: MAX_REPLY_TOKENS,
+      maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : MAX_REPLY_TOKENS,
       temperature: 0.7,
       topP: 0.9,
     });

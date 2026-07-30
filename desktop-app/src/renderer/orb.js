@@ -95,6 +95,11 @@ export function initOrb() {
   const WAKE_COOLDOWN_MS = 2500;
   const ASR_MIN_GAP_MS = 900;
 
+  /** How long to wait for a question after Buddy has said hello. */
+  const QUESTION_WINDOW_MS = 7000;
+  /** A spoken question can run longer than a two-word wake phrase. */
+  const QUESTION_MAX_MS = 12000;
+
   let wakeEnabled = true;
   let panelVisible = false;
   let microphone = null;
@@ -105,17 +110,39 @@ export function initOrb() {
   let toastTimer = null;
   let levelFrame = null;
 
+  /**
+   * The whole point of the wake word is to answer without getting in the way, so
+   * a spoken exchange happens entirely at the orb and never opens the panel.
+   *
+   *   wake      listening for its name
+   *   question  said hello, now waiting for what you actually want
+   *   busy      thinking, or talking back
+   *
+   * Clicking the orb still opens the panel; that is a separate thing.
+   */
+  let mode = 'wake';
+  let questionTimer = null;
+  /** Keeps a spoken exchange in the same conversation as its follow-ups. */
+  let voiceSessionId = null;
+
   const speaker = createSpeaker({
     onStart: () => stage.classList.add('answering'),
     onEnd: () => stage.classList.remove('answering'),
   });
 
-  function showToast(message, bad) {
+  function showToast(message, bad, holdMs) {
     toast.textContent = message;
     toast.classList.toggle('bad', Boolean(bad));
     toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+    if (holdMs !== 0) {
+      toastTimer = setTimeout(() => toast.classList.remove('show'), holdMs || 2600);
+    }
+  }
+
+  function hideToast() {
+    clearTimeout(toastTimer);
+    toast.classList.remove('show');
   }
 
   function flash(className, duration) {
@@ -131,6 +158,7 @@ export function initOrb() {
     const hot = listening();
     stage.classList.toggle('hot', hot);
     if (!voiceInputAvailable()) tooltip.textContent = 'Ask Buddy (listening is off)';
+    else if (mode === 'question') tooltip.textContent = 'Go ahead…';
     else tooltip.textContent = hot ? 'Listening for “Hey Buddy”' : 'Ask Buddy';
     if (!hot) level.style.setProperty('--level', '0');
   }
@@ -177,19 +205,112 @@ export function initOrb() {
 
   // ── the listening pipeline ──────────────────────────────────────────────
 
+  /** Turn a captured clip into words. Returns '' when there were none. */
+  async function transcribe(samples) {
+    const { text } = await api('/asr', {
+      pcm: samplesToBase64(samples),
+      sampleRate: microphone ? microphone.sampleRate : 16000,
+    });
+    return text || '';
+  }
+
+  function setMode(next) {
+    mode = next;
+    stage.classList.toggle('asking', next === 'question');
+    stage.classList.toggle('thinking', next === 'busy');
+    refreshHotState();
+  }
+
+  function backToWaiting() {
+    clearTimeout(questionTimer);
+    questionTimer = null;
+    setMode('wake');
+    if (detector) {
+      detector.configure({ hangoverMs: 650, maxClipMs: 5000 });
+      detector.restart();
+    }
+    refreshHotState();
+  }
+
+  /** Buddy has said hello — now listen for what they actually want. */
+  function openQuestionWindow() {
+    if (!listening()) return backToWaiting();
+    setMode('question');
+    showToast('Listening…', false, 0);
+    if (detector) {
+      // Room to finish a sentence, and to pause in the middle of one.
+      detector.configure({ hangoverMs: 950, maxClipMs: QUESTION_MAX_MS });
+      detector.restart();
+    }
+
+    clearTimeout(questionTimer);
+    questionTimer = setTimeout(() => {
+      if (mode !== 'question') return;
+      hideToast();
+      backToWaiting();
+    }, QUESTION_WINDOW_MS);
+  }
+
+  /**
+   * Answer out loud, at the orb. The panel is deliberately left shut: being able
+   * to ask a question without a window appearing over your work is the point.
+   */
+  async function answer(question) {
+    clearTimeout(questionTimer);
+    questionTimer = null;
+    setMode('busy');
+    // The window is 128px across, so there is nowhere to print a reply — it is
+    // spoken, and the whole exchange is saved to the conversation, which is
+    // there to read if the orb is clicked afterwards.
+    showToast('Thinking…', false, 0);
+
+    try {
+      const payload = await api('/chat', {
+        messages: [{ role: 'user', content: question }],
+        sessionId: voiceSessionId,
+        voice: true,
+      });
+      voiceSessionId = payload.sessionId || voiceSessionId;
+
+      const reply = String(payload.reply || '').trim();
+      if (!reply) return backToWaiting();
+
+      hideToast();
+      await speaker.speak(reply);
+    } catch (error) {
+      showToast(error.message.slice(0, 60), true, 4000);
+    } finally {
+      backToWaiting();
+    }
+  }
+
   async function considerClip(samples) {
     if (!samples.length) return;
+    if (!wakeEnabled || panelVisible) return;
+
+    // ── already awake: this clip is the question ──
+    if (mode === 'question') {
+      let question = '';
+      try {
+        question = await transcribe(samples);
+      } catch (error) {
+        console.warn('[buddy] could not transcribe the question:', error.message);
+      }
+      if (!question) {
+        hideToast();
+        return backToWaiting();
+      }
+      return answer(question);
+    }
+
+    if (mode !== 'wake') return;
     if (Date.now() - lastAsrAt < ASR_MIN_GAP_MS) return;
-    if (!wakeEnabled || panelVisible || Date.now() < cooldownUntil) return;
+    if (Date.now() < cooldownUntil) return;
     lastAsrAt = Date.now();
 
     let heard = '';
     try {
-      const { text } = await api('/asr', {
-        pcm: samplesToBase64(samples),
-        sampleRate: microphone ? microphone.sampleRate : 16000,
-      });
-      heard = text || '';
+      heard = await transcribe(samples);
     } catch (error) {
       // A failing wake check is not worth shouting about on every clip.
       console.warn('[buddy] wake check failed:', error.message);
@@ -200,18 +321,21 @@ export function initOrb() {
 
     cooldownUntil = Date.now() + WAKE_COOLDOWN_MS;
     flash('fired', 900);
-    showToast('Hey!');
 
-    const question = tailAfterWake(heard);
-    window.buddy.requestOpenPanel();
+    // Load whatever is cold while the greeting plays, so the answer does not
+    // have to wait for it. Costs nothing when everything is already warm.
+    api('/warm', {}).catch(() => {});
 
-    if (question) {
-      // They asked in the same breath — pass it straight through rather than
-      // greeting them and making them repeat it.
-      window.buddy.sendWakeQuestion(question);
-    } else {
-      speaker.say(runtime.greeting || 'Yeah?');
+    const tail = tailAfterWake(heard);
+    if (tail) {
+      // They asked in the same breath — skip the pleasantries.
+      return answer(tail);
     }
+
+    setMode('busy');
+    showToast('Hey!', false, 0);
+    await speaker.say(runtime.greeting || 'Yeah?');
+    openQuestionWindow();
   }
 
   function paintLevel() {

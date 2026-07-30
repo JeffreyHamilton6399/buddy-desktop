@@ -556,17 +556,6 @@ function registerIpc() {
   });
   ipcMain.on('buddy:open-config-folder', () => shell.openPath(app.getPath('userData')));
 
-  ipcMain.on('buddy:wake-question', (_event, text) => {
-    if (typeof text !== 'string' || !text.trim()) return;
-    showPanel();
-    // The panel may have only just been created, so wait for it to be ready
-    // rather than sending into a window that is still loading.
-    const deliver = () => panelWindow.webContents.send('buddy:wake-question', text.slice(0, 2000));
-    if (!panelWindow || panelWindow.isDestroyed()) return;
-    if (panelWindow.webContents.isLoading()) panelWindow.webContents.once('did-finish-load', deliver);
-    else deliver();
-  });
-
   ipcMain.on('buddy:runtime-changed', () => {
     eachRenderer((window) => window.webContents.send('buddy:runtime-changed'));
   });

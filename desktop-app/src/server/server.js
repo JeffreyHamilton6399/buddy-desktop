@@ -65,6 +65,19 @@ const SYSTEM_PROMPT =
   "the user's desktop. Keep replies short, natural, and friendly — like a " +
   'helpful companion. Avoid long lists unless asked.';
 
+/**
+ * Spoken answers are a different medium. Every extra sentence is another second
+ * of synthesis before the user hears anything and another few they have to sit
+ * through, and markdown is meaningless out loud.
+ */
+const SYSTEM_PROMPT_VOICE =
+  'You are Buddy, a friendly local AI assistant. You are being spoken aloud, so ' +
+  'answer in one or two short sentences of plain conversational English. No ' +
+  'lists, no markdown, no code blocks. If the answer is genuinely long, give the ' +
+  'short version and offer to say more.';
+
+const VOICE_REPLY_TOKENS = 120;
+
 const MAX_TTS_CHARS = 1024;
 const CONTEXT_MESSAGES = 20; // how much of a conversation the model is shown
 const MAX_BODY_BYTES = 12 * 1024 * 1024; // audio clips arrive as base64
@@ -547,6 +560,45 @@ async function handleSpeechDownload(req, res) {
   });
 }
 
+/**
+ * Load whatever is needed into memory before it is asked for.
+ *
+ * Measured on this machine: a reply takes 0.1s once the model is resident and
+ * 11.9s when it is not, so almost everything that reads as "the AI is slow" is
+ * the one-off load. The orb calls this the instant it hears its name, which
+ * overlaps the load with the second or so of greeting it speaks back.
+ */
+async function warmEverything() {
+  const settings = readSettings();
+  const jobs = [];
+
+  if (providers.usesBuiltinModel(settings)) {
+    const id = activeModelId(settings);
+    if (modelStore.isReady(configDir(), id)) jobs.push(builtin.warmUp(modelStore.modelPath(configDir(), id)));
+  }
+  if (providers.usesLocalVoice(settings) && voice.isReady(configDir())) {
+    jobs.push(voice.warmUp(configDir(), { greetingVoice: settings.tts.voice || undefined }));
+  }
+  if (providers.usesLocalHearing(settings) && hearing.isReady(configDir())) {
+    jobs.push(hearing.warmUp(configDir()));
+  }
+
+  // Never let a warm-up failure surface as a request error; the real call will
+  // report it properly if something is actually broken.
+  await Promise.allSettled(jobs);
+}
+
+async function handleWarm(_req, res) {
+  warmEverything().catch(() => {});
+  return sendJson(res, 202, {
+    warming: {
+      chat: builtin.isLoaded(),
+      voice: voice.isLoaded(),
+      hearing: hearing.isLoaded(),
+    },
+  });
+}
+
 /** The voice picker's options. Needs the model on disk, so it may take a moment. */
 async function handleListVoices(_req, res) {
   const settings = readSettings();
@@ -580,15 +632,28 @@ async function handleChat(req, res) {
   await history.load();
   const conversation = history.resolve(body.sessionId);
 
+  let added = 0;
   for (const message of incoming) {
     if (!message || typeof message.content !== 'string' || !message.content.trim()) continue;
     const role = message.role === 'assistant' ? 'assistant' : 'user';
     history.append(conversation, role, message.content.slice(0, 8000));
+    added += 1;
   }
+
+  // Every message was blank. This is what a transcription of silence looks like
+  // by the time it reaches here, and it is a bad request rather than a failure
+  // of the model — which would otherwise throw with nothing to reply to.
+  if (!added) {
+    return sendJson(res, 400, { error: 'There was nothing to reply to.', empty: true });
+  }
+
+  // Asked by voice, this answer is going to be read out — keep it to a sentence
+  // or two rather than making the user listen to a wall of text.
+  const spoken = body.voice === true;
 
   // The model only ever sees the tail of the conversation, however long it gets.
   const context = conversation.messages.slice(-CONTEXT_MESSAGES).map(({ role, content }) => ({ role, content }));
-  const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...context];
+  const messages = [{ role: 'system', content: spoken ? SYSTEM_PROMPT_VOICE : SYSTEM_PROMPT }, ...context];
 
   let completion;
   if (settings.chat.provider === 'builtin') {
@@ -603,6 +668,7 @@ async function handleChat(req, res) {
     completion = await builtin.chat({
       modelPath: modelStore.modelPath(configDir(), modelId),
       messages,
+      maxTokens: spoken ? VOICE_REPLY_TOKENS : undefined,
     });
   } else if (settings.chat.provider === 'ollama') {
     completion = await providers.ollamaChat({
@@ -851,6 +917,7 @@ const ROUTES = [
   ['DELETE', new RegExp(`^/models/${MODEL_ID}$`), handleRemoveModel],
   ['GET', /^\/speech$/, handleSpeechState],
   ['POST', /^\/speech$/, handleSpeechDownload],
+  ['POST', /^\/warm$/, handleWarm],
   ['GET', /^\/voices$/, handleListVoices],
   ['POST', /^\/setup$/, handleSetup],
   ['POST', /^\/chat$/, handleChat],
@@ -994,6 +1061,17 @@ function start(options = {}) {
       if (providers.isFullyLocal(settings)) console.log('    ✓ fully local — nothing leaves this machine');
       if (!process.env.BUDDY_TOKEN) console.log(`    token    ${AUTH_TOKEN}`);
       console.log('');
+
+      // Start loading the models now rather than on the first message. Buddy sits
+      // open all day waiting to be spoken to, so paying twelve seconds at launch
+      // — while nobody is waiting — beats paying it the first time somebody is.
+      if (options.warm !== false) {
+        const warmStarted = Date.now();
+        warmEverything()
+          .then(() => console.log(`[buddy] warm and ready in ${((Date.now() - warmStarted) / 1000).toFixed(1)}s`))
+          .catch(() => {});
+      }
+
       resolve({ port, token: AUTH_TOKEN, server });
     });
   });

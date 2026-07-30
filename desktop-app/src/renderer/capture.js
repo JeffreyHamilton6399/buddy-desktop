@@ -184,9 +184,12 @@ export function createVoiceDetector({
   onSpeechEnd,
   calibrationMs = 1200,
   sustainMs = 180,
-  hangoverMs = 650,
-  maxClipMs = 5000,
+  hangoverMs: initialHangoverMs = 650,
+  maxClipMs: initialMaxClipMs = 5000,
 } = {}) {
+  let hangoverMs = initialHangoverMs;
+  let maxClipMs = initialMaxClipMs;
+
   const FLOOR_FACTOR = 2.2;
   const FLOOR_MARGIN = 0.012;
   const MIN_THRESHOLD = 0.02;
@@ -211,6 +214,17 @@ export function createVoiceDetector({
     get speaking() {
       return speaking;
     },
+
+    /**
+     * Retune mid-flight. A two-word wake phrase and a spoken question want
+     * different limits: the phrase is over in a second, while a question needs
+     * room to run and tolerance for someone pausing to think.
+     */
+    configure(options = {}) {
+      if (Number.isFinite(options.hangoverMs)) hangoverMs = options.hangoverMs;
+      if (Number.isFinite(options.maxClipMs)) maxClipMs = options.maxClipMs;
+    },
+
     get noiseFloor() {
       return noiseFloor;
     },

@@ -58,9 +58,18 @@ you work it out, and the startup log prints `✓ fully local` only when none of 
 
 ### About the wake word
 
-Say **“Hey Buddy”** and the orb pulses, opens the panel, and answers *“Yeah? What would you like?”*
+Say **“Hey Buddy”** and the orb flashes, turns green, and answers *“Yeah? What would you like?”* Ask
+your question and it replies out loud — **all at the orb. The chat panel never opens.** Being able to
+ask something without a window appearing over your work is the entire point of a wake word; if you
+wanted the panel you would have clicked it.
+
 Run the two together — “Hey Buddy, what's the capital of Peru” — and it skips the greeting and just
 answers, because the whole sentence was already transcribed.
+
+Spoken answers are deliberately short: a sentence or two of plain speech, no lists and no markdown.
+Every extra sentence is another second of synthesis before you hear anything and several more you
+have to sit through. The exchange is saved to your conversations like any other, so clicking the orb
+afterwards shows what was said.
 
 It works by detecting speech locally (Web Audio RMS against a measured noise floor) and then
 transcribing a short clip to check whether you really said the name. **Where that clip goes depends
@@ -261,11 +270,14 @@ What the orb is telling you:
 | Orb | Meaning |
 | --- | --- |
 | Slow breathing glow | Idle |
-| Emerald ring and dot, gentle ripple | Mic is hot, listening for its name |
-| Amber ring, quick ripple, swelling with your voice | It can hear you talking right now |
+| Green ring and dot, gentle ripple | Mic is hot, listening for its name |
 | One bright pulse | It heard its name |
+| **Bright green ring, quick ripple, swelling with your voice** | **It is listening to your question** |
+| Steady dim ring, orb breathing quickly | Thinking |
 | Faster pulsing | It is speaking |
 | A shake | Something went wrong — the toast underneath says what |
+
+If you say nothing for seven seconds after it greets you, it goes quietly back to waiting.
 
 The wake word pauses automatically while the panel is open, and Buddy ignores its own voice so it
 cannot wake itself.

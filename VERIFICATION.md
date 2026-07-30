@@ -498,3 +498,54 @@ of behaviour as before, and it always works.
 - **`sharp` is shipped but never used.** transformers.js imports it statically for image pipelines
   Buddy has no use for, costing ~20 MB and carrying libvips CVEs that no Buddy code path can reach.
   It cannot be excluded without patching the dependency.
+
+---
+
+## v1.2.2 — answering at the orb, and where the slowness actually was
+
+### "The AI is slow" was not the model
+
+Measured through the running server before changing anything:
+
+| | Before | After |
+| --- | --- | --- |
+| First message of a session | **11.94s** | **0.49s** |
+| Any later message | 0.08–0.14s | 0.08–0.17s |
+| First spoken word of a reply | 3.45s | 1.24s |
+
+Generation was never the problem — the 1B model on Vulkan answers at 36–58 words per second, which is
+faster than the speech can be played. Almost all of the 11.9s was llama.cpp loading the model, and
+most of the rest was Kokoro loading on its first use. Both now load at startup, in the background,
+while nobody is waiting: the log reports `warm and ready in 14.7s` and the first real question is
+answered in half a second.
+
+The orb also asks the server to warm up the moment it hears its name, which overlaps any reload with
+the second or so of greeting it speaks back.
+
+### The full spoken round trip
+
+Kokoro was used to speak questions in a different voice, which Whisper then transcribed, so the whole
+loop ran through the real endpoints:
+
+```
+asked : "What is the capital of Peru?"
+heard : "What is the capital of Peru?"
+reply : "The capital of Peru is Lima."
+timing: hear 0.73s + think 0.40s + speak 1.13s = 2.27s to the first spoken word
+```
+
+Two of the three test questions came back verbatim. The third exposed a real defect: a clip Whisper
+found no words in produced an empty message, which reached the model and threw *"There was no user
+message to reply to"* as a 500. `/chat` now answers 400 with `empty: true` instead, and the orb
+treats it as "heard nothing" and goes back to waiting.
+
+### What could not be verified, again
+
+**The wake word still has not been triggered by a real voice** — this machine has no working
+microphone, so the orb cannot reach any of its listening states here and the green ring, the question
+window and its seven-second timeout have never been seen on screen. Everything either side of the
+microphone is verified: transcription, the phrase matcher, the chat call, the shortened spoken reply,
+and the speech. The state machine between them is not.
+
+What was checked in the app: it launches, warms all three models, logs no errors, and clicking the orb
+still opens the panel — the click and drag path survived the rewrite.
