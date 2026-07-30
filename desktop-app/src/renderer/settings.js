@@ -415,6 +415,62 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     setNote(event.target.checked ? 'Buddy is listening for its name.' : 'Buddy has stopped listening.');
   });
 
+  /**
+   * Show the last few things the orb transcribed while listening for its name.
+   *
+   * "It doesn't work" and "it heard you but read it as *hey buddha*" need
+   * completely different fixes, and only one of them is visible from outside.
+   */
+  async function renderHeard() {
+    const list = $('heard-list');
+    let entries = [];
+    try {
+      entries = (await window.buddy.getHeard()) || [];
+    } catch {
+      /* nothing recorded yet */
+    }
+
+    list.replaceChildren();
+    if (!entries.length) {
+      const empty = document.createElement('p');
+      empty.className = 'pane-lede';
+      empty.textContent =
+        runtime.providers.asr === 'off'
+          ? 'Listening is off, so Buddy is not hearing anything.'
+          : 'Nothing yet. Say something near the microphone and it will appear here.';
+      list.appendChild(empty);
+      return;
+    }
+
+    for (const entry of entries) {
+      const row = document.createElement('div');
+      row.className = 'heard' + (entry.matched ? ' is-match' : '');
+
+      const when = document.createElement('span');
+      when.className = 'heard-when';
+      when.textContent = new Date(entry.at).toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+
+      const what = document.createElement('span');
+      what.className = 'heard-text';
+      what.textContent = entry.note
+        ? entry.note
+        : entry.text
+          ? `“${entry.text}”`
+          : 'sound, but no words in it';
+
+      const tag = document.createElement('span');
+      tag.className = 'heard-tag';
+      tag.textContent = entry.matched ? 'woke' : `${entry.seconds.toFixed(1)}s`;
+
+      row.append(when, what, tag);
+      list.appendChild(row);
+    }
+  }
+
   /** Paint one line of the wake-word walkthrough. */
   function reportStep(step, state, detail) {
     const row = $('wake-probe').querySelector(`[data-step="${step}"]`);
@@ -659,7 +715,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     applyHearingPanes();
     $('whisper-url').value = runtime.asrBaseUrl || '';
     renderAbout();
-    await Promise.all([renderModels(), renderAssets(), renderChats()]);
+    await Promise.all([renderModels(), renderAssets(), renderChats(), renderHeard()]);
     if (runtime.providers.tts === 'kokoro' && !voicesLoaded) await loadKokoroVoices();
     if (runtime.providers.tts === 'system') loadSystemVoices();
   }
@@ -679,6 +735,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       pollTimer = setInterval(() => {
         renderAssets();
         renderModels();
+        renderHeard();
       }, POLL_MS);
     },
 

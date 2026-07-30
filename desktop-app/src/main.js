@@ -69,6 +69,8 @@ let setupCompleted = false;
 let dragTimer = null;
 /** The conversation the orb and the panel are both working in. */
 let activeChatId = null;
+/** The last few things the orb heard, newest first, for the settings panel. */
+const recentlyHeard = [];
 
 // ── persisted state ───────────────────────────────────────────────────────
 
@@ -640,6 +642,29 @@ function registerIpc() {
   });
 
   ipcMain.handle('buddy:get-active-chat', () => activeChatId);
+
+  /**
+   * A short record of what the orb has actually heard.
+   *
+   * The wake word failing is otherwise invisible: the orb is a separate window
+   * with no console anybody looks at, and "nothing happened" covers a dozen
+   * different faults. Keeping the last few attempts where the settings panel can
+   * show them turns "it doesn't work" into "it heard you and transcribed it as
+   * this", which is a fixable statement.
+   */
+  ipcMain.on('buddy:heard', (_event, entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    recentlyHeard.unshift({
+      at: Date.now(),
+      seconds: Number(entry.seconds) || 0,
+      text: typeof entry.text === 'string' ? entry.text.slice(0, 200) : '',
+      matched: Boolean(entry.matched),
+      note: typeof entry.note === 'string' ? entry.note.slice(0, 120) : '',
+    });
+    recentlyHeard.length = Math.min(recentlyHeard.length, 8);
+  });
+
+  ipcMain.handle('buddy:get-heard', () => recentlyHeard);
 
   ipcMain.on('buddy:chat-updated', (event, id) => {
     eachRenderer((window) => {

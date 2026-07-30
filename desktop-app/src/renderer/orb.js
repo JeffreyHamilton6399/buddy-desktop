@@ -14,6 +14,16 @@ import { $, api, boot, runtime, refreshRuntime, voiceInputAvailable } from './co
 import { openMicrophone, createVoiceDetector, samplesToBase64 } from './capture.js';
 import { createSpeaker } from './speech.js';
 
+/**
+ * What counts as being called. Whisper transcribes the same two words a dozen
+ * ways depending on the microphone, so the list is mishearings as much as
+ * phrasings — "hey buddha" and "hey body" are what a narrowband headset mic
+ * routinely produces for "hey buddy".
+ *
+ * Bare "buddy" is included because that is what people actually say once they
+ * are used to it. It costs the occasional false wake when the word comes up in
+ * conversation, which is a far smaller annoyance than not being heard.
+ */
 const WAKE_TARGETS = [
   'hey buddy',
   'hi buddy',
@@ -26,6 +36,9 @@ const WAKE_TARGETS = [
   'okay buddy',
   'yo buddy',
   'hey buddha',
+  'buddy',
+  'buddie',
+  'hey there buddy',
 ];
 
 function levenshtein(a, b) {
@@ -330,16 +343,25 @@ export function initOrb() {
     if (Date.now() < cooldownUntil) return;
     lastAsrAt = Date.now();
 
+    const seconds = samples.length / (microphone ? microphone.sampleRate : 16000);
+
     let heard = '';
     try {
       heard = await transcribe(samples);
     } catch (error) {
       // A failing wake check is not worth shouting about on every clip.
       console.warn('[buddy] wake check failed:', error.message);
+      window.buddy.reportHeard({ seconds, text: '', matched: false, note: error.message });
       return;
     }
 
-    if (!heard || !isWakePhrase(heard)) return;
+    const matched = Boolean(heard) && isWakePhrase(heard);
+    // Recorded whether it matched or not: a clip that came back as the wrong
+    // words is the single most useful thing to see when the wake word "does
+    // nothing", and it is invisible from outside the orb.
+    window.buddy.reportHeard({ seconds, text: heard, matched });
+
+    if (!matched) return;
 
     cooldownUntil = Date.now() + WAKE_COOLDOWN_MS;
     flash('fired', 900);
@@ -497,10 +519,11 @@ export function initOrb() {
       speaker.stop();
       if (microphone) microphone.cancelClip();
       stage.classList.remove('hearing');
-    } else if (detector) {
-      // The room may have changed while the panel was up.
-      detector.restart();
     }
+    // Deliberately no re-calibration on the way back. Measuring the room again
+    // costs nearly two seconds of being completely deaf, and closing the panel is
+    // exactly the moment someone is most likely to say "Hey Buddy". The floor
+    // drifts on its own during quiet stretches anyway.
     refreshHotState();
   });
 

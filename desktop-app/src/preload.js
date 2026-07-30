@@ -41,6 +41,10 @@ contextBridge.exposeInMainWorld('buddy', {
   getActiveChat: () => ipcRenderer.invoke('buddy:get-active-chat'),
   notifyChatUpdated: (id) => ipcRenderer.send('buddy:chat-updated', id || null),
 
+  /** What the orb heard, so the settings panel can show why it did not wake. */
+  reportHeard: (entry) => ipcRenderer.send('buddy:heard', entry),
+  getHeard: () => ipcRenderer.invoke('buddy:get-heard'),
+
   onWakeToggled: (handler) => subscribe('buddy:wake-toggled', handler),
   onPanelVisibility: (handler) => subscribe('buddy:panel-visibility', handler),
   onRuntimeChanged: (handler) => subscribe('buddy:runtime-changed', handler),

@@ -245,6 +245,13 @@
                     <span class="row-note" id="mic-test-note"></span>
                   </div>
 
+                  <!--
+                    What the orb has actually heard. Without this, a wake word
+                    that never fires gives you nothing to go on at all.
+                  -->
+                  <h3>What Buddy heard recently</h3>
+                  <div class="heard-list" id="heard-list"></div>
+
                   <div class="probe-list" id="wake-probe" hidden>
                     <div class="probe-step" data-step="engine"><i></i><span>Transcription engine</span><em></em></div>
                     <div class="probe-step" data-step="enabled"><i></i><span>Wake word switched on</span><em></em></div>

@@ -1153,6 +1153,51 @@ body.flat .panel {
   font-weight: 600;
 }
 
+/* ── what Buddy heard ────────────────────────────────────────────────────── */
+
+.heard-list {
+  margin-bottom: 4px;
+}
+
+.heard {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.heard-when {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #6f6068;
+  font-variant-numeric: tabular-nums;
+}
+
+.heard-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.heard-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #6f6068;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one that actually woke Buddy up. */
+.heard.is-match .heard-text {
+  color: var(--emerald);
+}
+
+.heard.is-match .heard-tag {
+  color: var(--emerald);
+}
+
 /* ── wake-word walkthrough ───────────────────────────────────────────────── */
 
 .probe-list {
