@@ -79,7 +79,11 @@
       "icon": "buddy-icon.png",
       "files": [
         "!node_modules/onnxruntime-node/bin/napi-v3/darwin/**",
-        "!node_modules/onnxruntime-node/bin/napi-v3/linux/**"
+        "!node_modules/onnxruntime-node/bin/napi-v3/linux/**",
+        "!node_modules/onnxruntime-node/bin/napi-v3/win32/arm64/**",
+        "!node_modules/@node-llama-cpp/win-arm64/**",
+        "!node_modules/@img/*-win32-arm64/**",
+        "!node_modules/@img/*-win32-ia32/**"
       ]
     },
     "nsis": {
@@ -99,7 +103,17 @@
       "description": "A local-first AI companion that lives on your desktop as a glowing orb",
       "files": [
         "!node_modules/onnxruntime-node/bin/napi-v3/win32/**",
-        "!node_modules/onnxruntime-node/bin/napi-v3/darwin/**"
+        "!node_modules/onnxruntime-node/bin/napi-v3/darwin/**",
+        "!node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/**",
+        "!node_modules/@node-llama-cpp/linux-arm64/**",
+        "!node_modules/@node-llama-cpp/linux-armv7l/**",
+        "!node_modules/@node-llama-cpp/linux-riscv64/**",
+        "!node_modules/@img/*-linuxmusl-*/**",
+        "!node_modules/@img/*-linux-arm/**",
+        "!node_modules/@img/*-linux-arm64/**",
+        "!node_modules/@img/*-linux-ppc64/**",
+        "!node_modules/@img/*-linux-riscv64/**",
+        "!node_modules/@img/*-linux-s390x/**"
       ]
     },
     "publish": {

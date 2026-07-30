@@ -457,6 +457,26 @@ npm run dist:win      # or dist:mac / dist:linux
 Artifacts land in `desktop-app/dist/`. You can only build for the platform you're on, apart from
 Linux targets from Linux — a Windows `.exe` needs Windows (or Wine), and a macOS `.dmg` needs macOS.
 
+#### Why `build.win/mac/linux.files` is full of exclusions
+
+Three dependencies ship binaries for machines you are not building for, and npm installs them anyway:
+
+- **`@node-llama-cpp/*`** declares no `cpu` field, so `npm ci` on an x64 runner still installs the
+  arm64 build — verified, `win-arm64` arrived on an x64 Windows runner. On Linux that means x64,
+  arm64, armv7l *and* riscv64.
+- **`onnxruntime-node`** ships every platform inside one package (~208 MB), so it cannot be filtered
+  by npm at all — only by the packager.
+- **`@img/*`** (sharp's native halves) is filtered properly by npm, but on Linux the glibc/musl split
+  still brings more than one.
+
+These are **denylists on purpose**: a pattern that fails to match ships an extra binary, whereas an
+allowlist that fails to match removes one that is needed and breaks the app at startup. `sharp` in
+particular must keep exactly one native build even though Buddy never processes an image — it is a
+static import inside transformers.js and throws at load time if its binary is missing.
+
+v1.2.0 shipped without the per-architecture half of this and the Linux artifacts came out at 436 MB
+against Windows' 184 MB, which is what prompted writing it down.
+
 ### Adding the release workflow
 
 **`.github/workflows/release.yml` is not in this repo yet**, and that is a token-permission problem
