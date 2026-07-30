@@ -44,8 +44,8 @@
             <p class="lede">Say “Hey Buddy”. It just works.</p>
             <p class="sub">
               A small glowing orb that sits on top of everything. Click it or call its name, then talk or type —
-              Buddy answers out loud. No API key, no account, no sign-in: Buddy brings its own model and speaks
-              with your computer's own voice. It works with the network unplugged.
+              Buddy answers out loud. No API key, no account, no sign-in: Buddy brings its own brain, its own
+              voice and its own ears. It works with the network unplugged.
             </p>
             <div class="cta-row">
               <a class="btn btn-primary" id="hero-download" href="#download">Download Buddy</a>
@@ -94,8 +94,8 @@
               <span class="card-icon" aria-hidden="true">◍</span>
               <h3>Talks back to you</h3>
               <p>
-                Every reply is spoken in a warm voice with a live equaliser, and you can mute it with one tap
-                when you'd rather just read.
+                Every reply is spoken by a neural voice that runs on your own machine — 28 of them to pick from
+                — with a live equaliser and one tap to mute when you'd rather just read.
               </p>
             </li>
             <li class="card reveal">
@@ -110,8 +110,8 @@
               <span class="card-icon" aria-hidden="true">◈</span>
               <h3>Nothing to set up</h3>
               <p>
-                No API key, no account, no provider to pick. Buddy downloads its own language model once, then
-                thinks on your machine with llama.cpp and talks with your OS's own voices.
+                No API key, no account, no provider to pick. Buddy downloads its own model once, then thinks
+                with llama.cpp, speaks with Kokoro and listens with Whisper — all on your machine.
               </p>
             </li>
             <li class="card reveal">
@@ -180,13 +180,13 @@
                   </tr>
                   <tr>
                     <td><strong>Talking</strong></td>
-                    <td class="never">your OS's own voices</td>
-                    <td>a cloud API</td>
+                    <td class="never">Kokoro, inside the app</td>
+                    <td>your OS's voices · a cloud API</td>
                   </tr>
                   <tr>
                     <td><strong>Hearing</strong></td>
-                    <td class="never">off — the mic is never opened</td>
-                    <td>local Whisper · a cloud API</td>
+                    <td class="never">Whisper, inside the app</td>
+                    <td>your own Whisper server · a cloud API · off</td>
                   </tr>
                   <tr>
                     <td><strong>Your chats</strong></td>
@@ -211,9 +211,10 @@
             <p class="honest-flag">
               <strong>About the wake word:</strong> Buddy spots speech locally, then transcribes a short clip to
               check whether you said “Hey Buddy”. Where that clip goes is exactly your <em>hearing</em> setting.
-              Local Whisper means ambient audio never leaves your device. z-ai means short clips of ambient
-              sound are sent there whenever something sounds like speech. Set hearing to <strong>off</strong>
-              and Buddy never opens your microphone at all — you just type instead.
+              By default that is Whisper inside the app, so ambient audio never leaves your device. Point hearing
+              at a cloud API instead and short clips of ambient sound are sent there whenever something sounds
+              like speech. Set hearing to <strong>off</strong> and Buddy never opens your microphone at all —
+              you just type instead.
             </p>
           </div>
           <ul class="badges reveal">
@@ -234,10 +235,51 @@
           <div class="orb orb-lg pulse reveal" aria-hidden="true"></div>
           <h2 class="reveal">Download Buddy</h2>
           <p class="section-lede reveal" id="download-line">
-macOS <code>.dmg</code> · Windows <code>.exe</code> · Linux <code>.AppImage</code> — about 140 MB
+            Free and MIT licensed. Pick your platform — the file downloads straight from GitHub.
           </p>
-          <a class="btn btn-primary btn-lg reveal" id="download-btn" href="#">Download Buddy</a>
-          <p class="cta-note reveal" id="download-hint">Takes you to the latest release on GitHub.</p>
+
+          <div class="downloads reveal" id="downloads">
+            <article class="dl-card" data-os="mac">
+              <svg class="dl-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="12" rx="2" />
+                <path d="M2 20h20" />
+              </svg>
+              <h3>macOS</h3>
+              <a class="btn btn-primary dl-main" data-asset="mac-arm64" href="#">Apple Silicon</a>
+              <p class="dl-meta"><span data-size-for="mac-arm64"></span> · <code>.dmg</code></p>
+              <a class="dl-alt" data-asset="mac-x64" href="#">Intel Mac instead</a>
+              <p class="dl-note">M1 or later. Choose Intel for a pre-2020 Mac.</p>
+            </article>
+
+            <article class="dl-card" data-os="windows">
+              <svg class="dl-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="8" height="8" rx="1" />
+                <rect x="13" y="3" width="8" height="8" rx="1" />
+                <rect x="3" y="13" width="8" height="8" rx="1" />
+                <rect x="13" y="13" width="8" height="8" rx="1" />
+              </svg>
+              <h3>Windows</h3>
+              <a class="btn btn-primary dl-main" data-asset="win" href="#">Download</a>
+              <p class="dl-meta"><span data-size-for="win"></span> · <code>.exe</code></p>
+              <p class="dl-note">64-bit, Windows 10 or later.</p>
+            </article>
+
+            <article class="dl-card" data-os="linux">
+              <svg class="dl-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="2.5" y="4" width="19" height="16" rx="2.5" />
+                <path d="M7 10l2.5 2L7 14M12 15h5" />
+              </svg>
+              <h3>Linux</h3>
+              <a class="btn btn-primary dl-main" data-asset="linux-appimage" href="#">AppImage</a>
+              <p class="dl-meta"><span data-size-for="linux-appimage"></span> · x86-64</p>
+              <a class="dl-alt" data-asset="linux-deb" href="#">.deb package instead</a>
+              <p class="dl-note">Run <code>chmod +x</code> on the AppImage first.</p>
+            </article>
+          </div>
+
+          <p class="cta-note reveal" id="download-hint">
+            <a id="all-releases" href="#">All releases, checksums and release notes on GitHub</a>
+          </p>
 
           <div class="note reveal">
             <h3>First launch</h3>
