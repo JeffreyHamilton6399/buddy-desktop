@@ -22,6 +22,8 @@
           Buddy
         </a>
         <nav class="top-nav">
+          <a href="#does">Features</a>
+          <a href="#privacy">Privacy</a>
           <a href="#download">Download</a>
           <a id="hero-source" href="#">Source</a>
         </nav>
@@ -29,170 +31,189 @@
     </header>
 
     <main id="main">
-      <!-- ── intro ─────────────────────────────────────────────────────── -->
-      <section class="wrap intro" id="top">
-        <span class="orb orb-lg" aria-hidden="true"></span>
-        <h1>An AI that lives on your desktop, not on someone's server.</h1>
-        <p class="lede">
-          Buddy is a small orb that sits above your other windows. Click it, or say “Hey Buddy”, and it
-          answers out loud. There is no API key, no account and no sign-in — it brings its own model, its
-          own voice and its own ears, and keeps working with the network unplugged.
-        </p>
-        <p class="actions">
-          <a class="btn btn-solid" id="hero-download" href="#download">Download</a>
-          <span class="actions-note" id="hero-platform">macOS, Windows and Linux. Free, MIT licensed.</span>
-        </p>
+      <!-- ── intro: copy beside the product ────────────────────────────── -->
+      <section class="hero" id="top">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <span class="orb orb-lg" aria-hidden="true"></span>
+            <h1>An AI that lives on your desktop, not on someone's server.</h1>
+            <p class="lede">
+              A small orb that sits above your other windows. Click it, or say “Hey Buddy”, and it answers
+              out loud. No API key, no account, no sign-in — it brings its own model, its own voice and its
+              own ears, and keeps working with the network unplugged.
+            </p>
+            <p class="actions">
+              <a class="btn btn-solid" id="hero-download" href="#download">Download</a>
+              <span class="actions-note" id="hero-platform">macOS, Windows and Linux. Free, MIT licensed.</span>
+            </p>
+
+            <dl class="specs">
+              <div><dt>Thinks with</dt><dd>Llama 3.2</dd></div>
+              <div><dt>Speaks with</dt><dd>Kokoro, 28 voices</dd></div>
+              <div><dt>Listens with</dt><dd>Whisper</dd></div>
+              <div><dt>Sends home</dt><dd>nothing</dd></div>
+            </dl>
+          </div>
+
+          <figure class="shot">
+            <img
+              src="buddy-panel.png"
+              width="420"
+              height="620"
+              alt="Buddy's chat panel: a message asking what five plus three is, answered 'Five plus three is eight.'"
+              decoding="async"
+            />
+          </figure>
+        </div>
       </section>
 
-      <figure class="shot">
-        <img
-          src="buddy-panel.png"
-          width="420"
-          height="620"
-          alt="Buddy's chat panel: a message asking what five plus three is, answered 'Five plus three is eight.'"
-          loading="lazy"
-          decoding="async"
-        />
-      </figure>
-
       <!-- ── what it does ──────────────────────────────────────────────── -->
-      <section class="wrap block">
-        <h2>What it does</h2>
-        <dl class="deflist">
-          <dt>Answers without asking anyone</dt>
-          <dd>
-            Llama 3.2 runs inside the app through llama.cpp. Three larger models are a click away if your
-            machine can take them, and an Ollama you already run shows up alongside them.
-          </dd>
-
-          <dt>Speaks in a real voice</dt>
-          <dd>
-            Not the robotic one your operating system ships with. Kokoro generates the speech on your own
-            CPU, with 28 voices to choose between.
-          </dd>
-
-          <dt>Answers to its name</dt>
-          <dd>
-            Whisper listens for “Hey Buddy” on-device. Ask in the same breath — “Hey Buddy, what's the
-            capital of Peru” — and it skips the pleasantries and just answers.
-          </dd>
-
-          <dt>Keeps your conversations</dt>
-          <dd>
-            Saved to your disk as readable JSON. Browse them, reopen them, delete them. None of it is
-            uploaded anywhere.
-          </dd>
-        </dl>
+      <section class="band" id="does">
+        <div class="wrap">
+          <h2>What it does</h2>
+          <div class="four">
+            <div class="item">
+              <h3>Answers without asking anyone</h3>
+              <p>
+                Llama 3.2 runs inside the app through llama.cpp. Three larger models are a click away, and an
+                Ollama you already run shows up beside them.
+              </p>
+            </div>
+            <div class="item">
+              <h3>Speaks in a real voice</h3>
+              <p>
+                Not the robotic one your operating system ships with. Kokoro generates the speech on your own
+                CPU, with 28 voices to choose between.
+              </p>
+            </div>
+            <div class="item">
+              <h3>Answers to its name</h3>
+              <p>
+                Whisper listens for “Hey Buddy” on-device and replies at the orb — no window opens over your
+                work. Ask in the same breath and it skips the pleasantries.
+              </p>
+            </div>
+            <div class="item">
+              <h3>Keeps your conversations</h3>
+              <p>
+                Saved to your disk as readable JSON. Browse them, reopen them, delete them. None of it is
+                uploaded anywhere.
+              </p>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ── privacy ───────────────────────────────────────────────────── -->
-      <section class="wrap block">
-        <h2>Where each part runs</h2>
-        <p>
-          Buddy has three jobs, and out of the box all three happen on your computer. You can move any of
-          them to a cloud API. Nothing asks you to.
-        </p>
+      <section class="band" id="privacy">
+        <div class="wrap split">
+          <div class="split-main">
+            <h2>Where each part runs</h2>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Job</th>
+                    <th scope="col">Default</th>
+                    <th scope="col">If you go looking</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">Thinking</th>
+                    <td>Llama 3.2, in the app</td>
+                    <td>Ollama, a cloud API</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Speaking</th>
+                    <td>Kokoro, in the app</td>
+                    <td>your OS's voices, a cloud API</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Listening</th>
+                    <td>Whisper, in the app</td>
+                    <td>your own Whisper server, a cloud API, off</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Your chats</th>
+                    <td>your disk</td>
+                    <td>never uploaded</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Job</th>
-                <th scope="col">Default</th>
-                <th scope="col">If you go looking</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Thinking</th>
-                <td>Llama 3.2, in the app</td>
-                <td>Ollama, a cloud API</td>
-              </tr>
-              <tr>
-                <th scope="row">Speaking</th>
-                <td>Kokoro, in the app</td>
-                <td>your OS's voices, a cloud API</td>
-              </tr>
-              <tr>
-                <th scope="row">Listening</th>
-                <td>Whisper, in the app</td>
-                <td>your own Whisper server, a cloud API, off</td>
-              </tr>
-              <tr>
-                <th scope="row">Your chats</th>
-                <td>your disk</td>
-                <td>never uploaded</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="split-side">
+            <p>
+              Buddy has three jobs, and out of the box all three happen on your computer. You can move any of
+              them to a cloud API. Nothing asks you to.
+            </p>
+            <p>
+              The exception is the first launch, which downloads the model, the voice and the ears — about a
+              gigabyte in total, once. After that you can unplug the network and Buddy carries on. Please do
+              check. No telemetry, no account.
+            </p>
+            <p class="aside">
+              Point a job at a cloud API and that job stops being private: those messages go to the provider
+              to be processed. What stays true either way is that there is no Buddy server and no proxy —
+              nothing of yours passes through us, because there is no “us” in the path. Setting listening to
+              <em>off</em> means the microphone is never opened at all.
+            </p>
+          </div>
         </div>
-
-        <p>
-          The exception is the first launch, which downloads the model, the voice and the ears from
-          HuggingFace — about a gigabyte in total, once. After that you can unplug the network and Buddy
-          carries on. Please do check. There is no telemetry and no account.
-        </p>
-        <p class="aside">
-          Point a job at a cloud API and that job stops being private: those messages go to the provider to
-          be processed. What stays true either way is that there is no Buddy server and no proxy — nothing
-          of yours passes through us, because there is no “us” in the path. The same goes for the wake word:
-          by default the audio is transcribed in the app, and setting listening to <em>off</em> means the
-          microphone is never opened at all.
-        </p>
       </section>
 
       <!-- ── download ──────────────────────────────────────────────────── -->
-      <section class="wrap block" id="download">
-        <h2>Download</h2>
-        <p id="download-line">Free and MIT licensed.</p>
+      <section class="band" id="download">
+        <div class="wrap">
+          <div class="band-head">
+            <h2>Download</h2>
+            <p id="download-line">Free and MIT licensed.</p>
+          </div>
 
-        <ul class="downloads" id="downloads">
-          <li class="dl-card" data-os="mac">
-            <div class="dl-head">
+          <ul class="downloads" id="downloads">
+            <li class="dl-card" data-os="mac">
               <h3>macOS</h3>
               <span class="dl-meta"><span data-size-for="mac-arm64"></span> · Apple Silicon</span>
-            </div>
-            <!-- The alternate comes first so the primary button is the rightmost
-                 thing on every row and their edges line up. -->
-            <div class="dl-links">
-              <a class="dl-alt" data-asset="mac-x64" href="#">Intel Mac</a>
-              <a class="btn" data-asset="mac-arm64" href="#">Download</a>
-            </div>
-          </li>
+              <div class="dl-links">
+                <a class="btn" data-asset="mac-arm64" href="#">Download</a>
+                <a class="dl-alt" data-asset="mac-x64" href="#">Intel Mac</a>
+              </div>
+            </li>
 
-          <li class="dl-card" data-os="windows">
-            <div class="dl-head">
+            <li class="dl-card" data-os="windows">
               <h3>Windows</h3>
               <span class="dl-meta"><span data-size-for="win"></span> · 64-bit, 10 or later</span>
-            </div>
-            <div class="dl-links">
-              <a class="btn" data-asset="win" href="#">Download</a>
-            </div>
-          </li>
+              <div class="dl-links">
+                <a class="btn" data-asset="win" href="#">Download</a>
+              </div>
+            </li>
 
-          <li class="dl-card" data-os="linux">
-            <div class="dl-head">
+            <li class="dl-card" data-os="linux">
               <h3>Linux</h3>
               <span class="dl-meta"><span data-size-for="linux-appimage"></span> · AppImage, x86-64</span>
-            </div>
-            <div class="dl-links">
-              <a class="dl-alt" data-asset="linux-deb" href="#">.deb</a>
-              <a class="btn" data-asset="linux-appimage" href="#">Download</a>
-            </div>
-          </li>
-        </ul>
+              <div class="dl-links">
+                <a class="btn" data-asset="linux-appimage" href="#">Download</a>
+                <a class="dl-alt" data-asset="linux-deb" href="#">.deb</a>
+              </div>
+            </li>
+          </ul>
 
-        <p class="aside">
-          <a id="all-releases" href="#">All releases and notes on GitHub</a>. Nothing here is code-signed, so
-          the first launch needs a nudge: on macOS right-click the app and choose <em>Open</em>; on Windows
-          click <em>More info</em> then <em>Run anyway</em>; on Linux <code>chmod +x</code> the AppImage.
-        </p>
+          <p class="aside">
+            <a id="all-releases" href="#">All releases and notes on GitHub</a>. Nothing here is code-signed, so
+            the first launch needs a nudge: on macOS right-click the app and choose <em>Open</em>; on Windows
+            click <em>More info</em> then <em>Run anyway</em>; on Linux <code>chmod +x</code> the AppImage.
+          </p>
+        </div>
       </section>
     </main>
 
-    <footer class="wrap foot">
-      <span>MIT licensed</span>
-      <a id="footer-repo" href="#">GitHub</a>
+    <footer class="foot">
+      <div class="wrap foot-inner">
+        <span>MIT licensed</span>
+        <a id="footer-repo" href="#">GitHub</a>
+      </div>
     </footer>
 
     <script src="app.js"></script>

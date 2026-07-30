@@ -1,9 +1,10 @@
 /*
  * Buddy landing page.
  *
- * Deliberately plain: one column, one accent, no gradients on text, no icon
- * glyphs, no scroll animation. The orb is the only decorative thing on the page
- * because it is the product. Everything else is type and space.
+ * Wide rather than a narrow column: the hero puts the copy beside a real
+ * screenshot, and the sections below run in two to four tracks, so most of the
+ * page is readable without scrolling. One accent — the orb — because it is the
+ * product. No gradients on text, no icon glyphs, no scroll animation.
  */
 
 :root {
@@ -14,7 +15,8 @@
   --line: rgba(255, 255, 255, 0.1);
   --line-soft: rgba(255, 255, 255, 0.055);
   --hover: rgba(255, 255, 255, 0.045);
-  --measure: 640px;
+  --wrap: 1160px;
+  --gutter: 32px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -27,6 +29,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
@@ -35,7 +38,7 @@ body {
   color: var(--text);
   font-family: var(--font);
   font-size: 16px;
-  line-height: 1.65;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -49,28 +52,27 @@ h1,
 h2,
 h3 {
   font-weight: 560;
-  letter-spacing: -0.021em;
+  letter-spacing: -0.022em;
   line-height: 1.2;
   margin: 0;
   text-wrap: balance;
 }
 
 p {
-  margin: 0 0 18px;
+  margin: 0 0 16px;
   text-wrap: pretty;
 }
 
 code {
   font-family: var(--mono);
   font-size: 0.88em;
-  color: var(--text);
 }
 
 .wrap {
   width: 100%;
-  max-width: var(--measure);
+  max-width: var(--wrap);
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 var(--gutter);
 }
 
 .skip {
@@ -109,14 +111,19 @@ code {
 }
 
 .orb-lg {
-  width: 46px;
-  height: 46px;
-  margin-bottom: 32px;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 26px;
 }
 
 /* ── header ──────────────────────────────────────────────────────────────── */
 
 .top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: rgba(10, 10, 11, 0.82);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -124,7 +131,7 @@ code {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 62px;
+  height: 60px;
 }
 
 .brand {
@@ -137,7 +144,7 @@ code {
 
 .top-nav {
   display: flex;
-  gap: 22px;
+  gap: 24px;
   font-size: 14.5px;
   color: var(--muted);
 }
@@ -146,16 +153,23 @@ code {
   color: var(--text);
 }
 
-/* ── intro ───────────────────────────────────────────────────────────────── */
+/* ── hero ────────────────────────────────────────────────────────────────── */
 
-.intro {
-  padding: 104px 24px 60px;
+.hero {
+  padding: 56px 0 64px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.intro h1 {
-  font-size: clamp(31px, 5.4vw, 43px);
-  letter-spacing: -0.032em;
-  line-height: 1.12;
+.hero-grid {
+  display: grid;
+  gap: 44px;
+  align-items: center;
+}
+
+.hero h1 {
+  font-size: clamp(32px, 4.4vw, 50px);
+  letter-spacing: -0.033em;
+  line-height: 1.08;
   margin-bottom: 20px;
 }
 
@@ -163,27 +177,8 @@ code {
   color: var(--muted);
   font-size: 17px;
   line-height: 1.6;
-  margin-bottom: 30px;
-  max-width: 34em;
-}
-
-/* ── product shot ────────────────────────────────────────────────────────── */
-
-.shot {
-  margin: 0;
-  padding: 8px 24px 76px;
-  display: flex;
-  justify-content: center;
-}
-
-.shot img {
-  width: 100%;
-  max-width: 340px;
-  height: auto;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  /* Enough shadow to lift it off the page, not enough to be the point. */
-  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.9);
+  margin-bottom: 26px;
+  max-width: 46ch;
 }
 
 .actions {
@@ -199,7 +194,48 @@ code {
   font-size: 13.5px;
 }
 
-/* ── buttons and links ───────────────────────────────────────────────────── */
+/* A quick factual strip, so the hero says what it is as well as what it feels like. */
+.specs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 28px;
+  margin: 36px 0 0;
+  padding-top: 26px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.specs dt {
+  color: var(--dim);
+  font-size: 12px;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.specs dd {
+  margin: 0;
+  font-size: 14.5px;
+}
+
+/* ── product shot ────────────────────────────────────────────────────────── */
+
+.shot {
+  margin: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.shot img {
+  width: 100%;
+  max-width: 380px;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  /* Enough shadow to lift it off the page, not enough to be the point. */
+  box-shadow: 0 30px 70px -24px rgba(0, 0, 0, 0.95);
+}
+
+/* ── buttons ─────────────────────────────────────────────────────────────── */
 
 .btn {
   display: inline-flex;
@@ -220,41 +256,62 @@ code {
 }
 
 /* The one call to action worth making obvious. */
-.btn-solid {
+.btn-solid,
+.dl-card.is-yours .btn {
   background: var(--text);
   border-color: var(--text);
   color: #0a0a0b;
   font-weight: 580;
 }
 
-.btn-solid:hover {
+.btn-solid:hover,
+.dl-card.is-yours .btn:hover {
   background: #fff;
   border-color: #fff;
 }
 
-/* ── content blocks ──────────────────────────────────────────────────────── */
+/* ── bands ───────────────────────────────────────────────────────────────── */
 
-.block {
-  padding: 46px 24px;
-  border-top: 1px solid var(--line-soft);
+.band {
+  padding: 54px 0;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.block h2 {
+/* The header is sticky, so an anchor jump has to stop short of it. */
+[id] {
+  scroll-margin-top: 78px;
+}
+
+.band h2 {
   font-size: 15px;
   font-weight: 560;
   color: var(--muted);
-  letter-spacing: 0.01em;
   margin-bottom: 26px;
 }
 
-.block > p {
+.band-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 26px;
+}
+
+.band-head h2 {
+  margin-bottom: 0;
+}
+
+.band-head p {
+  margin: 0;
   color: var(--muted);
+  font-size: 14.5px;
 }
 
 .aside {
   color: var(--dim);
-  font-size: 14px;
-  line-height: 1.62;
+  font-size: 13.5px;
+  line-height: 1.6;
   margin-bottom: 0;
 }
 
@@ -267,32 +324,42 @@ code {
   color: var(--text);
 }
 
-/* ── definition list, in place of feature cards ──────────────────────────── */
+/* ── four-up feature row ─────────────────────────────────────────────────── */
 
-.deflist {
+.four {
+  display: grid;
+  gap: 30px 36px;
+}
+
+.item h3 {
+  font-size: 15.5px;
+  margin-bottom: 7px;
+}
+
+.item p {
   margin: 0;
-}
-
-.deflist dt {
-  font-weight: 560;
-  letter-spacing: -0.012em;
-  margin-bottom: 6px;
-}
-
-.deflist dd {
-  margin: 0 0 26px;
   color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.6;
 }
 
-.deflist dd:last-child {
-  margin-bottom: 0;
+/* ── split: table beside its explanation ─────────────────────────────────── */
+
+.split {
+  display: grid;
+  gap: 36px;
+  align-items: start;
+}
+
+.split-side p {
+  color: var(--muted);
+  font-size: 14.5px;
 }
 
 /* ── table ───────────────────────────────────────────────────────────────── */
 
 .table-scroll {
   overflow-x: auto;
-  margin: 0 0 22px;
 }
 
 table {
@@ -305,17 +372,17 @@ th,
 td {
   text-align: left;
   font-weight: 400;
-  padding: 11px 16px 11px 0;
+  padding: 12px 18px 12px 0;
   border-bottom: 1px solid var(--line-soft);
   vertical-align: top;
 }
 
 thead th {
   color: var(--dim);
-  font-size: 12.5px;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  letter-spacing: 0.045em;
   text-transform: uppercase;
-  padding-bottom: 9px;
+  padding-bottom: 10px;
 }
 
 tbody th {
@@ -341,27 +408,32 @@ tbody tr:last-child td {
 
 .downloads {
   list-style: none;
-  margin: 0 0 22px;
+  margin: 0 0 24px;
   padding: 0;
-  border-top: 1px solid var(--line-soft);
+  display: grid;
+  gap: 14px;
 }
 
 .dl-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 17px 0;
-  border-bottom: 1px solid var(--line-soft);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
 }
 
-.dl-head h3 {
+.dl-card.is-yours {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.dl-card h3 {
   font-size: 16px;
-  margin-bottom: 3px;
 }
 
 .dl-meta {
-  display: block;
   color: var(--dim);
   font-size: 13.5px;
   font-variant-numeric: tabular-nums;
@@ -371,6 +443,7 @@ tbody tr:last-child td {
   display: flex;
   align-items: center;
   gap: 16px;
+  margin-top: 16px;
 }
 
 .dl-alt {
@@ -384,77 +457,94 @@ tbody tr:last-child td {
   color: var(--text);
 }
 
-/*
- * The row matching the visitor gets the solid button. Making all three solid
- * would be three shouts; making none of them solid leaves the page's strongest
- * button on a link that merely scrolls down to here.
- */
-.dl-card.is-yours .btn {
-  background: var(--text);
-  border-color: var(--text);
-  color: #0a0a0b;
-  font-weight: 580;
-}
-
-.dl-card.is-yours .btn:hover {
-  background: #fff;
-  border-color: #fff;
-}
-
 /* The platform the visitor is on, marked rather than chosen for them. */
 .dl-tag {
   order: -1;
-  align-self: center;
-  padding: 2px 8px;
+  padding: 2px 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  color: var(--dim);
+  color: var(--text);
   font-size: 11px;
   letter-spacing: 0.03em;
-}
-
-.dl-card.is-yours .dl-tag {
-  color: var(--text);
-  border-color: rgba(255, 255, 255, 0.26);
 }
 
 /* ── footer ──────────────────────────────────────────────────────────────── */
 
 .foot {
+  padding: 24px 0 40px;
+  color: var(--dim);
+  font-size: 13.5px;
+}
+
+.foot-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 26px;
-  padding-bottom: 40px;
-  margin-top: 28px;
-  border-top: 1px solid var(--line-soft);
-  color: var(--dim);
-  font-size: 13.5px;
 }
 
 .foot a:hover {
   color: var(--text);
 }
 
-/* ── narrow ──────────────────────────────────────────────────────────────── */
+/* ── wider screens: use them ─────────────────────────────────────────────── */
 
-@media (max-width: 560px) {
-  .intro {
-    padding-top: 64px;
-    padding-bottom: 56px;
+@media (min-width: 720px) {
+  .four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .dl-card {
-    align-items: flex-start;
-    flex-wrap: wrap;
+  .downloads {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
 
-  .dl-links {
-    width: 100%;
-    justify-content: space-between;
+@media (min-width: 1000px) {
+  .hero {
+    padding: 72px 0 80px;
   }
+  /* Copy on the left, the app itself on the right. */
+  .hero-grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 64px;
+  }
+  .four {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .split {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    gap: 56px;
+  }
+  .specs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
 
-  .dl-tag {
-    order: 0;
+/* Four nav links plus the wordmark do not fit on a phone; the section links go
+   and Download stays, which is the only one anybody came for. */
+@media (max-width: 520px) {
+  .top-nav a[href="#does"],
+  .top-nav a[href="#privacy"] {
+    display: none;
+  }
+}
+
+@media (max-width: 719px) {
+  :root {
+    --gutter: 22px;
+  }
+  .hero {
+    padding: 40px 0 48px;
+  }
+  .top-nav {
+    gap: 16px;
+    font-size: 13.5px;
+  }
+  .shot img {
+    max-width: 300px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
   }
 }
