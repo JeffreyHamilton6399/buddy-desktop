@@ -17,7 +17,6 @@ const API_LATEST = `https://api.github.com/repos/${OWNER}/${REPO}/releases/lates
   const links = {
     'hero-download': '#download',
     'hero-source': REPO_URL,
-    'nav-demo': '#download',
     'footer-repo': REPO_URL,
     'all-releases': RELEASES_LATEST,
   };
@@ -103,9 +102,7 @@ function formatSize(bytes) {
 
       const version = String(release.tag_name || '').replace(/^v/, '');
       const line = document.getElementById('download-line');
-      if (version && line) {
-        line.textContent = `Version ${version} — free and MIT licensed. The file downloads straight from GitHub.`;
-      }
+      if (version && line) line.textContent = `Version ${version}. Free and MIT licensed.`;
     })
     .catch(() => {
       // The pre-set releases-page links stand; nothing to undo.
@@ -129,7 +126,6 @@ function formatSize(bytes) {
   const isLinux = !isMac && !isWindows && /Linux|X11|Ubuntu/i.test(agent);
   const isMobile = /Android|iPhone|iPad|iPod/i.test(agent);
 
-  const hero = document.getElementById('hero-download');
   const heroNote = document.getElementById('hero-platform');
 
   if (isMobile) {
@@ -140,68 +136,13 @@ function formatSize(bytes) {
   const os = isMac ? 'mac' : isWindows ? 'windows' : isLinux ? 'linux' : null;
   if (!os) return;
 
-  const label = { mac: 'macOS', windows: 'Windows', linux: 'Linux' }[os];
   const card = document.querySelector(`.dl-card[data-os="${os}"]`);
-  if (card) {
-    card.classList.add('is-yours');
-    const tag = document.createElement('span');
-    tag.className = 'dl-tag';
-    tag.textContent = 'Your system';
-    card.prepend(tag);
-  }
-  if (hero) hero.textContent = `Download for ${label}`;
-})();
+  if (!card) return;
+  card.classList.add('is-yours');
 
-/* mobile nav */
-(function mobileNav() {
-  const toggle = document.getElementById('nav-toggle');
-  const links = document.getElementById('nav-links');
-  if (!toggle || !links) return;
-
-  toggle.addEventListener('click', () => {
-    const open = links.classList.toggle('open');
-    toggle.setAttribute('aria-expanded', String(open));
-  });
-
-  links.addEventListener('click', (event) => {
-    if (event.target.tagName !== 'A') return;
-    links.classList.remove('open');
-    toggle.setAttribute('aria-expanded', 'false');
-  });
-})();
-
-/* fade sections in as they scroll into view */
-(function reveal() {
-  // Opt in to the hidden starting state only now that we know JS is running.
-  document.documentElement.classList.add('js');
-
-  const items = Array.from(document.querySelectorAll('.reveal'));
-  if (!items.length) return;
-
-  if (!('IntersectionObserver' in window)) {
-    items.forEach((item) => item.classList.add('shown'));
-    return;
-  }
-
-  // Anything already on screen should just be there — no transition to miss.
-  const fold = window.innerHeight;
-  const pending = items.filter((item) => {
-    if (item.getBoundingClientRect().top >= fold) return true;
-    item.classList.add('instant', 'shown');
-    return false;
-  });
-
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry, index) => {
-        if (!entry.isIntersecting) return;
-        // A small stagger keeps a row of cards from popping in all at once.
-        setTimeout(() => entry.target.classList.add('shown'), index * 70);
-        observer.unobserve(entry.target);
-      });
-    },
-    { rootMargin: '0px 0px -8% 0px', threshold: 0.08 }
-  );
-
-  pending.forEach((item) => observer.observe(item));
+  const tag = document.createElement('span');
+  tag.className = 'dl-tag';
+  tag.textContent = 'yours';
+  const links = card.querySelector('.dl-links');
+  if (links) links.prepend(tag);
 })();

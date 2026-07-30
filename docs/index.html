@@ -3,330 +3,185 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Buddy — your local AI companion</title>
+    <title>Buddy — a local AI companion</title>
     <meta
       name="description"
-      content="Buddy is a friendly AI companion that lives on your desktop as a small glowing orb. No API key and no account — it brings its own model and runs entirely on your computer."
+      content="Buddy is an AI companion that lives on your desktop as a small orb. No API key and no account — it brings its own model, voice and ears, and runs entirely on your computer."
     />
-    <meta name="theme-color" content="#0b0b0f" />
+    <meta name="theme-color" content="#0a0a0b" />
     <link rel="icon" href="orb.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
 
-    <nav class="nav">
-      <div class="wrap nav-inner">
+    <header class="top">
+      <div class="wrap top-inner">
         <a class="brand" href="#top">
-          <span class="orb orb-sm" aria-hidden="true"></span>
-          <span>Buddy</span>
+          <span class="orb orb-xs" aria-hidden="true"></span>
+          Buddy
         </a>
-        <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
-          <span aria-hidden="true"></span>
-          <span aria-hidden="true"></span>
-          <span class="sr-only">Menu</span>
-        </button>
-        <div class="nav-links" id="nav-links">
-          <a href="#features">Features</a>
+        <nav class="top-nav">
           <a href="#download">Download</a>
-          <a class="nav-demo" id="nav-demo" href="#download">Demo</a>
-        </div>
+          <a id="hero-source" href="#">Source</a>
+        </nav>
       </div>
-    </nav>
+    </header>
 
     <main id="main">
-      <!-- ── hero ──────────────────────────────────────────────────────── -->
-      <header class="hero" id="top">
-        <div class="wrap hero-inner">
-          <div class="hero-copy reveal">
-            <p class="eyebrow">Runs entirely on your computer</p>
-            <h1>Meet Buddy.<br /><span class="grad">Your local AI companion.</span></h1>
-            <p class="lede">Say “Hey Buddy”. It just works.</p>
-            <p class="sub">
-              A small glowing orb that sits on top of everything. Click it or call its name, then talk or type —
-              Buddy answers out loud. No API key, no account, no sign-in: Buddy brings its own brain, its own
-              voice and its own ears. It works with the network unplugged.
-            </p>
-            <div class="cta-row">
-              <a class="btn btn-primary" id="hero-download" href="#download">Download Buddy</a>
-              <a class="btn btn-ghost" id="hero-source" href="#download">View source</a>
-            </div>
-            <p class="cta-note" id="hero-platform">macOS · Windows · Linux — free and MIT licensed</p>
-          </div>
-
-          <div class="hero-art reveal" aria-hidden="true">
-            <div class="halo"></div>
-            <div class="orb orb-lg"></div>
-            <div class="mock">
-              <div class="mock-head">
-                <span class="orb orb-xs"></span>
-                <div>
-                  <strong>Buddy</strong>
-                  <em>online</em>
-                </div>
-              </div>
-              <div class="mock-msg them">Hey! I'm Buddy. Ask me anything.</div>
-              <div class="mock-msg me">what's on my calendar today?</div>
-              <div class="mock-msg them">
-                <span class="dots"><i></i><i></i><i></i></span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <!-- ── features ──────────────────────────────────────────────────── -->
-      <section class="section" id="features">
-        <div class="wrap">
-          <h2 class="reveal">Small orb, real presence</h2>
-          <p class="section-lede reveal">The things Buddy is built to do well.</p>
-
-          <ul class="grid">
-            <li class="card reveal">
-              <span class="card-icon" aria-hidden="true">◎</span>
-              <h3>Always one click away</h3>
-              <p>
-                A frameless, always-on-top orb you can drag anywhere. It remembers where you left it and stays
-                out of your taskbar.
-              </p>
-            </li>
-            <li class="card reveal">
-              <span class="card-icon" aria-hidden="true">◍</span>
-              <h3>Talks back to you</h3>
-              <p>
-                Every reply is spoken by a neural voice that runs on your own machine — 28 of them to pick from
-                — with a live equaliser and one tap to mute when you'd rather just read.
-              </p>
-            </li>
-            <li class="card reveal">
-              <span class="card-icon" aria-hidden="true">◌</span>
-              <h3>Hears “Hey Buddy”</h3>
-              <p>
-                Leave the wake word on and Buddy answers to its name — panel open, a quick “Yeah?”, ready to
-                listen. Toggle it off from the tray any time.
-              </p>
-            </li>
-            <li class="card reveal">
-              <span class="card-icon" aria-hidden="true">◈</span>
-              <h3>Nothing to set up</h3>
-              <p>
-                No API key, no account, no provider to pick. Buddy downloads its own model once, then thinks
-                with llama.cpp, speaks with Kokoro and listens with Whisper — all on your machine.
-              </p>
-            </li>
-            <li class="card reveal">
-              <span class="card-icon" aria-hidden="true">◉</span>
-              <h3>Remembers your chats</h3>
-              <p>
-                Every conversation is saved to your own disk as readable JSON. Browse them from the panel,
-                reopen any of them, and delete what you don't want — none of it is ever uploaded.
-              </p>
-            </li>
-          </ul>
-        </div>
+      <!-- ── intro ─────────────────────────────────────────────────────── -->
+      <section class="wrap intro" id="top">
+        <span class="orb orb-lg" aria-hidden="true"></span>
+        <h1>An AI that lives on your desktop, not on someone's server.</h1>
+        <p class="lede">
+          Buddy is a small orb that sits above your other windows. Click it, or say “Hey Buddy”, and it
+          answers out loud. There is no API key, no account and no sign-in — it brings its own model, its
+          own voice and its own ears, and keeps working with the network unplugged.
+        </p>
+        <p class="actions">
+          <a class="btn" id="hero-download" href="#download">Download</a>
+          <span class="actions-note" id="hero-platform">macOS, Windows and Linux. Free, MIT licensed.</span>
+        </p>
       </section>
 
-      <!-- ── how it works ──────────────────────────────────────────────── -->
-      <section class="section alt" id="how">
-        <div class="wrap">
-          <h2 class="reveal">Up and running in three steps</h2>
-          <ol class="steps">
-            <li class="step reveal">
-              <span class="step-num">1</span>
-              <h3>Download</h3>
-              <p>Grab the installer for your OS from the latest release.</p>
-            </li>
-            <li class="step reveal">
-              <span class="step-num">2</span>
-              <h3>Wait once</h3>
-              <p>
-                Buddy fetches its language model — about 770 MB, with a progress bar. This happens a single
-                time and then never again.
-              </p>
-            </li>
-            <li class="step reveal">
-              <span class="step-num">3</span>
-              <h3>Say “Hey Buddy”</h3>
-              <p>Or just click the orb. Talk or type — Buddy answers out loud.</p>
-            </li>
-          </ol>
-        </div>
+      <!-- ── what it does ──────────────────────────────────────────────── -->
+      <section class="wrap block">
+        <h2>What it does</h2>
+        <dl class="deflist">
+          <dt>Answers without asking anyone</dt>
+          <dd>
+            Llama 3.2 runs inside the app through llama.cpp. Three larger models are a click away if your
+            machine can take them, and an Ollama you already run shows up alongside them.
+          </dd>
+
+          <dt>Speaks in a real voice</dt>
+          <dd>
+            Not the robotic one your operating system ships with. Kokoro generates the speech on your own
+            CPU, with 28 voices to choose between.
+          </dd>
+
+          <dt>Answers to its name</dt>
+          <dd>
+            Whisper listens for “Hey Buddy” on-device. Ask in the same breath — “Hey Buddy, what's the
+            capital of Peru” — and it skips the pleasantries and just answers.
+          </dd>
+
+          <dt>Keeps your conversations</dt>
+          <dd>
+            Saved to your disk as readable JSON. Browse them, reopen them, delete them. None of it is
+            uploaded anywhere.
+          </dd>
+        </dl>
       </section>
 
       <!-- ── privacy ───────────────────────────────────────────────────── -->
-      <section class="section" id="privacy">
-        <div class="wrap narrow">
-          <h2 class="reveal">What “local” means here</h2>
-          <div class="honest reveal">
-            <p>
-              Buddy has three separate jobs, and <strong>out of the box all three happen on your computer.</strong>
-              You can move any of them to a cloud API, but nothing asks you to.
-            </p>
+      <section class="wrap block">
+        <h2>Where each part runs</h2>
+        <p>
+          Buddy has three jobs, and out of the box all three happen on your computer. You can move any of
+          them to a cloud API. Nothing asks you to.
+        </p>
 
-            <div class="table-scroll">
-              <table class="privacy-table">
-                <thead>
-                  <tr>
-                    <th>Job</th>
-                    <th>Default — no setup</th>
-                    <th>If you go looking</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><strong>Thinking</strong></td>
-                    <td class="never">Llama 3.2 1B, inside the app</td>
-                    <td>Ollama · a cloud API</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Talking</strong></td>
-                    <td class="never">Kokoro, inside the app</td>
-                    <td>your OS's voices · a cloud API</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Hearing</strong></td>
-                    <td class="never">Whisper, inside the app</td>
-                    <td>your own Whisper server · a cloud API · off</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Your chats</strong></td>
-                    <td>always your disk</td>
-                    <td class="never">never uploaded</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <p>
-              <strong>The one exception is a single download on first launch:</strong> the model file, about
-              770 MB, comes from HuggingFace. After that, unplug your network and Buddy carries on working —
-              please do check. There is no telemetry and no account.
-            </p>
-            <p>
-              <strong>If you do switch a job to a cloud API, that job stops being private</strong>, and we won't
-              pretend otherwise: those messages go to the provider to be processed. What stays true either way
-              is that there is no Buddy server, no proxy and no account — nothing of yours passes through us,
-              because there is no “us” in the path.
-            </p>
-            <p class="honest-flag">
-              <strong>About the wake word:</strong> Buddy spots speech locally, then transcribes a short clip to
-              check whether you said “Hey Buddy”. Where that clip goes is exactly your <em>hearing</em> setting.
-              By default that is Whisper inside the app, so ambient audio never leaves your device. Point hearing
-              at a cloud API instead and short clips of ambient sound are sent there whenever something sounds
-              like speech. Set hearing to <strong>off</strong> and Buddy never opens your microphone at all —
-              you just type instead.
-            </p>
-          </div>
-          <ul class="badges reveal">
-            <li>No API key</li>
-            <li>Runs with the network unplugged</li>
-            <li>No hosted backend</li>
-            <li>No account</li>
-            <li>Chats never leave your disk</li>
-            <li>Wake word can be turned off</li>
-            <li>MIT licensed</li>
-          </ul>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Job</th>
+                <th scope="col">Default</th>
+                <th scope="col">If you go looking</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Thinking</th>
+                <td>Llama 3.2, in the app</td>
+                <td>Ollama, a cloud API</td>
+              </tr>
+              <tr>
+                <th scope="row">Speaking</th>
+                <td>Kokoro, in the app</td>
+                <td>your OS's voices, a cloud API</td>
+              </tr>
+              <tr>
+                <th scope="row">Listening</th>
+                <td>Whisper, in the app</td>
+                <td>your own Whisper server, a cloud API, off</td>
+              </tr>
+              <tr>
+                <th scope="row">Your chats</th>
+                <td>your disk</td>
+                <td>never uploaded</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+
+        <p>
+          The exception is the first launch, which downloads the model, the voice and the ears from
+          HuggingFace — about a gigabyte in total, once. After that you can unplug the network and Buddy
+          carries on. Please do check. There is no telemetry and no account.
+        </p>
+        <p class="aside">
+          Point a job at a cloud API and that job stops being private: those messages go to the provider to
+          be processed. What stays true either way is that there is no Buddy server and no proxy — nothing
+          of yours passes through us, because there is no “us” in the path. The same goes for the wake word:
+          by default the audio is transcribed in the app, and setting listening to <em>off</em> means the
+          microphone is never opened at all.
+        </p>
       </section>
 
       <!-- ── download ──────────────────────────────────────────────────── -->
-      <section class="section alt" id="download">
-        <div class="wrap narrow download">
-          <div class="orb orb-lg pulse reveal" aria-hidden="true"></div>
-          <h2 class="reveal">Download Buddy</h2>
-          <p class="section-lede reveal" id="download-line">
-            Free and MIT licensed. Pick your platform — the file downloads straight from GitHub.
-          </p>
+      <section class="wrap block" id="download">
+        <h2>Download</h2>
+        <p id="download-line">Free and MIT licensed.</p>
 
-          <div class="downloads reveal" id="downloads">
-            <article class="dl-card" data-os="mac">
-              <svg class="dl-glyph" viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3" y="4" width="18" height="12" rx="2" />
-                <path d="M2 20h20" />
-              </svg>
+        <ul class="downloads" id="downloads">
+          <li class="dl-card" data-os="mac">
+            <div class="dl-head">
               <h3>macOS</h3>
-              <a class="btn btn-primary dl-main" data-asset="mac-arm64" href="#">Apple Silicon</a>
-              <p class="dl-meta"><span data-size-for="mac-arm64"></span> · <code>.dmg</code></p>
-              <a class="dl-alt" data-asset="mac-x64" href="#">Intel Mac instead</a>
-              <p class="dl-note">M1 or later. Choose Intel for a pre-2020 Mac.</p>
-            </article>
+              <span class="dl-meta"><span data-size-for="mac-arm64"></span> · Apple Silicon</span>
+            </div>
+            <!-- The alternate comes first so the primary button is the rightmost
+                 thing on every row and their edges line up. -->
+            <div class="dl-links">
+              <a class="dl-alt" data-asset="mac-x64" href="#">Intel Mac</a>
+              <a class="btn" data-asset="mac-arm64" href="#">Download</a>
+            </div>
+          </li>
 
-            <article class="dl-card" data-os="windows">
-              <svg class="dl-glyph" viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3" y="3" width="8" height="8" rx="1" />
-                <rect x="13" y="3" width="8" height="8" rx="1" />
-                <rect x="3" y="13" width="8" height="8" rx="1" />
-                <rect x="13" y="13" width="8" height="8" rx="1" />
-              </svg>
+          <li class="dl-card" data-os="windows">
+            <div class="dl-head">
               <h3>Windows</h3>
-              <a class="btn btn-primary dl-main" data-asset="win" href="#">Download</a>
-              <p class="dl-meta"><span data-size-for="win"></span> · <code>.exe</code></p>
-              <p class="dl-note">64-bit, Windows 10 or later.</p>
-            </article>
+              <span class="dl-meta"><span data-size-for="win"></span> · 64-bit, 10 or later</span>
+            </div>
+            <div class="dl-links">
+              <a class="btn" data-asset="win" href="#">Download</a>
+            </div>
+          </li>
 
-            <article class="dl-card" data-os="linux">
-              <svg class="dl-glyph" viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="2.5" y="4" width="19" height="16" rx="2.5" />
-                <path d="M7 10l2.5 2L7 14M12 15h5" />
-              </svg>
+          <li class="dl-card" data-os="linux">
+            <div class="dl-head">
               <h3>Linux</h3>
-              <a class="btn btn-primary dl-main" data-asset="linux-appimage" href="#">AppImage</a>
-              <p class="dl-meta"><span data-size-for="linux-appimage"></span> · x86-64</p>
-              <a class="dl-alt" data-asset="linux-deb" href="#">.deb package instead</a>
-              <p class="dl-note">Run <code>chmod +x</code> on the AppImage first.</p>
-            </article>
-          </div>
+              <span class="dl-meta"><span data-size-for="linux-appimage"></span> · AppImage, x86-64</span>
+            </div>
+            <div class="dl-links">
+              <a class="dl-alt" data-asset="linux-deb" href="#">.deb</a>
+              <a class="btn" data-asset="linux-appimage" href="#">Download</a>
+            </div>
+          </li>
+        </ul>
 
-          <p class="cta-note reveal" id="download-hint">
-            <a id="all-releases" href="#">All releases, checksums and release notes on GitHub</a>
-          </p>
-
-          <div class="note reveal">
-            <h3>First launch</h3>
-            <p>
-              These builds aren't code-signed, so your OS will warn you the first time. That's expected — here's
-              how to get past it:
-            </p>
-            <ul>
-              <li>
-                <strong>Every OS:</strong> the first launch downloads Buddy's language model (~770 MB) and shows
-                a progress bar. It resumes if interrupted. Nothing to configure.
-              </li>
-              <li>
-                <strong>macOS:</strong> right-click the app and choose <em>Open</em> (don't double-click). If it
-                says the app is damaged, run
-                <code>xattr -dr com.apple.quarantine /Applications/Buddy.app</code>
-              </li>
-              <li><strong>Windows:</strong> on the SmartScreen prompt, click <em>More info</em> → <em>Run anyway</em>.</li>
-              <li><strong>Linux:</strong> mark the AppImage executable — <code>chmod +x Buddy-*.AppImage</code></li>
-            </ul>
-          </div>
-
-          <div class="note reveal">
-            <h3>What's inside</h3>
-            <ul>
-              <li>The draggable always-on-top orb, with its position remembered between launches</li>
-              <li>A Siri-style chat panel with spoken replies and a mic button</li>
-              <li>Saved conversations you can browse, reopen and delete — kept on your disk only</li>
-              <li>Its own language model, fetched once on first launch and run in-process with llama.cpp</li>
-              <li>“Hey Buddy” wake word, with a tray toggle to switch it off</li>
-              <li>A tray/menu-bar icon: open Buddy, toggle the wake word, quit</li>
-              <li>A loopback-only local server that holds your key and talks to whichever model you chose</li>
-            </ul>
-          </div>
-        </div>
+        <p class="aside">
+          <a id="all-releases" href="#">All releases and notes on GitHub</a>. Nothing here is code-signed, so
+          the first launch needs a nudge: on macOS right-click the app and choose <em>Open</em>; on Windows
+          click <em>More info</em> then <em>Run anyway</em>; on Linux <code>chmod +x</code> the AppImage.
+        </p>
       </section>
     </main>
 
-    <footer class="footer">
-      <div class="wrap footer-inner">
-        <span class="brand">
-          <span class="orb orb-sm" aria-hidden="true"></span>
-          <span>Buddy</span>
-        </span>
-        <span class="footer-mid">Made with ♥ · © 2026 Buddy</span>
-        <a id="footer-repo" href="#">GitHub</a>
-      </div>
+    <footer class="wrap foot">
+      <span>MIT licensed</span>
+      <a id="footer-repo" href="#">GitHub</a>
     </footer>
 
     <script src="app.js"></script>
