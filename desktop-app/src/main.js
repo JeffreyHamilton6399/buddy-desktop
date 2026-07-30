@@ -572,6 +572,49 @@ function registerIpc() {
   });
   ipcMain.on('buddy:open-config-folder', () => shell.openPath(app.getPath('userData')));
 
+  /**
+   * Carry out an action the model asked for.
+   *
+   * The server already validated this, and it is validated again here. That is
+   * not redundancy for its own sake: this is the only place in Buddy that hands
+   * something to the operating system, and it should not be reachable by anyone
+   * who manages to put a message on the wire. A name off the list, or a URL that
+   * is not http, gets nothing done.
+   */
+  ipcMain.handle('buddy:run-action', async (_event, action) => {
+    const name = action && typeof action.name === 'string' ? action.name : '';
+    const value = action && typeof action.value === 'string' ? action.value : '';
+
+    if (name === 'open_url' || name === 'search_web') {
+      let url;
+      try {
+        url = new URL(value);
+      } catch {
+        return { ok: false, error: 'That was not a valid address.' };
+      }
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return { ok: false, error: 'Only web addresses can be opened.' };
+      }
+      await shell.openExternal(url.toString());
+      return { ok: true };
+    }
+
+    if (name === 'open_folder') {
+      // Names map to folders; a path never arrives from outside.
+      const folders = {
+        models: path.join(app.getPath('userData'), 'models'),
+        chats: path.join(app.getPath('userData'), 'chats'),
+        config: app.getPath('userData'),
+      };
+      const target = folders[value];
+      if (!target) return { ok: false, error: 'There is no such folder.' };
+      await shell.openPath(target);
+      return { ok: true };
+    }
+
+    return { ok: false, error: `Buddy cannot do "${name}".` };
+  });
+
   ipcMain.on('buddy:runtime-changed', () => {
     eachRenderer((window) => window.webContents.send('buddy:runtime-changed'));
   });

@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('buddy', {
   openExternal: (url) => ipcRenderer.send('buddy:open-external', String(url)),
   openConfigFolder: () => ipcRenderer.send('buddy:open-config-folder'),
 
+  /** Carry out an action the model asked for. Re-validated in the main process. */
+  runAction: (action) => ipcRenderer.invoke('buddy:run-action', action),
+
   startOrbDrag: () => ipcRenderer.send('buddy:orb-drag-start'),
   endOrbDrag: () => ipcRenderer.send('buddy:orb-drag-end'),
 

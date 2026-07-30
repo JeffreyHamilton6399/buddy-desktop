@@ -362,6 +362,8 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   function applyHearingPanes() {
     $('asr-provider').value = runtime.providers.asr;
     $('whisper-options').hidden = runtime.providers.asr !== 'whisper';
+    $('allow-actions').checked = Boolean(runtime.allowActions);
+    applyActionsNote();
     const wake = $('wake-toggle');
     wake.checked = Boolean(getWakeEnabled ? getWakeEnabled() : boot.wakeEnabled);
     // Without a way to transcribe, the wake word has nothing to listen with.
@@ -379,6 +381,34 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   $('whisper-url').addEventListener('change', async (event) => {
     if (event.target.value.trim()) await save({ asr: { baseUrl: event.target.value.trim() } });
   });
+
+  $('allow-actions').addEventListener('change', async (event) => {
+    if (!(await save({ allowActions: event.target.checked }))) {
+      event.target.checked = !event.target.checked;
+      return;
+    }
+    await refreshRuntime();
+    applyActionsNote();
+    setNote(event.target.checked ? 'Buddy can open things now.' : 'Buddy can no longer open anything.');
+  });
+
+  /**
+   * Say plainly how well this is likely to go. Emitting a structured action on
+   * cue is a lot to ask of a 1B model — it will sometimes describe the action
+   * instead of performing it — and the honest thing is to say so where the
+   * switch is, not to let it look broken.
+   */
+  function applyActionsNote() {
+    const note = $('actions-note');
+    if (!runtime.allowActions) {
+      note.textContent = '';
+      return;
+    }
+    const small = runtime.providers.chat === 'builtin' && /1B/i.test(runtime.chatModel || '');
+    note.textContent = small
+      ? `${runtime.chatModel} is small and will not always get this right — it may describe an action instead of doing it. A larger model under Brain is much more reliable.`
+      : 'Ask for something like “open the BBC website” or “search for tide times”.';
+  }
 
   $('wake-toggle').addEventListener('change', (event) => {
     window.buddy.setWakeEnabled(event.target.checked);

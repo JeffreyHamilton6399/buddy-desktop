@@ -549,3 +549,64 @@ and the speech. The state machine between them is not.
 
 What was checked in the app: it launches, warms all three models, logs no errors, and clicking the orb
 still opens the panel — the click and drag path survived the rewrite.
+
+---
+
+## Wake word, speed, and doing things — post-1.2.2
+
+### The wake word now says what is wrong with it
+
+Reported as simply not working, and not reproducible here at first: this machine had no microphone
+until a Bluetooth headset was connected. Settings → Hearing gained a walkthrough that reports each
+link in the chain separately. Run with a real voice it returned:
+
+```
+Transcription engine   Whisper, in the app
+Wake word switched on  on
+Microphone opens       16 kHz
+Hearing sound          peak 0.142
+Speech detected        4.4s captured
+Words understood       "Hey buddy, what is the sound of?"
+Matched "Hey Buddy"    yes — this would wake Buddy
+```
+
+So the audio path works end to end, which moves the fault into the orb. Three things there could stop
+it and are fixed: readiness was checked once at startup and never again (fatal on a new install,
+where the ears are still downloading at that moment); wake clips ran to five seconds, long enough to
+bury a one-second phrase while the rate limiter dropped the next check; and forcing the audio context
+to 16 kHz throws outright on drivers that will not run at it.
+
+An honest note on the detector changes shipped alongside — settling period, 75th percentile, forced
+re-measure after a maximum-length clip. A simulated Bluetooth microphone (silent while the link
+settles, then a real noise floor) passes both before *and* after those changes, so the simulation does
+not reproduce the reported fault and these are hardening rather than a demonstrated fix.
+
+### "Still slow" was the idle unload
+
+Warm-start landed in 1.2.2 and took the first message from 11.94s to 0.49s. What it did not cover is
+the models being dropped after thirty minutes idle, which put the twelve seconds straight back for
+anyone returning to Buddy after lunch. Unloading is now suspended while the wake word is on — the one
+state in which Buddy is actively claiming to be ready — at a cost of roughly 1.4 GB resident.
+
+### Doing things on the computer
+
+Off by default. The model emits `[[open_url: https://example.com]]`; the server parses it, checks the
+name against a fixed list and validates the argument; the main process validates again before calling
+`shell.openExternal`. Sixteen parser cases pass, including the ones that matter:
+
+| Input | Result |
+| --- | --- |
+| `[[action: open_url \| file:///C:/Windows/System32]]` | refused — only http and https |
+| `[[action: open_url \| javascript:alert(1)]]` | refused |
+| `[[action: open_url \| data:text/html,…]]` | refused |
+| `[[action: delete_everything \| C:/]]` | refused — not an action |
+| `[[action: open_folder \| ../../../Windows]]` | refused — names, not paths |
+
+Verified in the running app: "open example.com" produced the reply, the transcript note, and a real
+browser window titled *Example Domain - Google Chrome*.
+
+The prompt had to be rewritten to get there. Asked for `[[action: NAME | ARG]]`, the 1B model wrote
+`[[open_url: …]]` and invented `[[search: tide times | tide.org]]`; told the rules without examples it
+narrated "Here you are on the web" and did nothing at all. Given three worked examples it emitted a
+correct action six times out of six. It still misses on some phrasings, which is why the settings
+panel recommends a larger model.

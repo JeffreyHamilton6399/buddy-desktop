@@ -158,6 +158,7 @@ listed [below](#where-things-are-stored). Restart Buddy after editing, or POST t
 
 | Job | Setting | Values |
 | --- | --- | --- |
+| Doing things | `allowActions` | `false` (default) · `true` |
 | Thinking | `chat.provider` | `builtin` (default) · `ollama` · `z-ai` |
 | Which built-in | `chat.builtinModel` | `llama-3.2-1b-instruct-q4_k_m` (default) · `llama-3.2-3b-instruct-q4_k_m` · `qwen2.5-3b-instruct-q4_k_m` · `qwen2.5-7b-instruct-q4_k_m` |
 | Talking | `tts.provider` | `kokoro` (default) · `system` · `z-ai` |
@@ -165,6 +166,29 @@ listed [below](#where-things-are-stored). Restart Buddy after editing, or POST t
 
 Upgrading from 1.1.0 moves you onto the new voice and ears automatically, unless you had deliberately
 chosen the cloud or your own Whisper server — those choices are left alone.
+
+### Letting Buddy do things on the computer
+
+**Off by default.** Turn it on in **Settings → Hearing → Let Buddy open things**, and Buddy can:
+
+| Ask for | What happens |
+| --- | --- |
+| “open example.com” | opens it in your browser |
+| “search the web for tide times” | opens a DuckDuckGo search |
+| “open my chats folder” | opens one of Buddy's own folders |
+
+That is the whole list, and it is a list on purpose. **The model never runs anything.** It writes a
+marker line — `[[open_url: https://example.com]]` — which the server parses, checks against the list
+above, and validates: a URL has to parse and has to be `http` or `https`, so `file://`,
+`javascript:` and `data:` are refused; a folder has to be one of three names, so a path cannot be
+smuggled in. The main process validates it a second time, because it is the only part of Buddy that
+hands anything to the operating system and should not trust a message just because it arrived.
+Nothing happens silently: every action is written into the transcript as it runs.
+
+The 1B default model manages this more often than you would expect — six times out of six on direct
+phrasings when last measured — but it is genuinely weak at it and will sometimes answer “opening it
+now” without writing the marker, which does nothing. **A 3B model is much more reliable**; the
+settings panel says so next to the switch.
 
 ### A bigger built-in model
 

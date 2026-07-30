@@ -119,11 +119,36 @@ export function initPanel() {
       setBusy(false);
       setStatus('online');
       speak(payload.reply);
+      await performAction(payload);
     } catch (error) {
       typingRow.remove();
       addMessage('error', error.message);
       setBusy(false);
       setStatus('offline', 'bad');
+    }
+  }
+
+  /**
+   * Do the thing the model asked for, and say so in the transcript.
+   *
+   * Nothing happens silently. Opening a tab you did not ask for is only mildly
+   * annoying, but not knowing which of your programs opened it is worse — so the
+   * action is always written down, whether it worked or was refused.
+   */
+  async function performAction(payload) {
+    if (payload.actionRefused) {
+      addMessage('note', payload.actionRefused);
+      return;
+    }
+    if (!payload.action) return;
+
+    const note = addMessage('note', `About to ${payload.action.description}…`);
+    try {
+      const result = await window.buddy.runAction(payload.action);
+      note.textContent =
+        result && result.ok ? `${payload.action.done}.` : `Couldn't do that: ${(result && result.error) || 'unknown'}`;
+    } catch (error) {
+      note.textContent = `Couldn't do that: ${error.message}`;
     }
   }
 

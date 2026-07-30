@@ -36,6 +36,8 @@ const DEFAULTS = {
   tts: { provider: 'kokoro', voice: '', speed: 1 },
   asr: { provider: 'local', baseUrl: 'http://127.0.0.1:8000/v1', model: 'Systran/faster-whisper-small' },
   saveHistory: true,
+  // Buddy reaching outside its own window is opt-in, always.
+  allowActions: false,
 };
 
 /** Bumped whenever defaults change in a way an existing install should inherit. */
@@ -102,6 +104,8 @@ function normaliseSettings(raw) {
       model: text(asr.model, DEFAULTS.asr.model),
     },
     saveHistory: input.saveHistory !== false,
+    // Defaults to false rather than true: this one has to be asked for.
+    allowActions: input.allowActions === true,
   };
 }
 

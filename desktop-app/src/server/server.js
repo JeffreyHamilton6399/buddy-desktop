@@ -38,6 +38,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const providers = require('./providers.js');
+const actions = require('./actions.js');
 const builtin = require('./builtin.js');
 const modelStore = require('./model.js');
 const voice = require('./voice.js');
@@ -393,6 +394,7 @@ function describeRuntime() {
     cloud: providers.cloudCapabilities(settings),
     fullyLocal: providers.isFullyLocal(settings),
     saveHistory: settings.saveHistory,
+    allowActions: settings.allowActions,
   };
 }
 
@@ -653,7 +655,9 @@ async function handleChat(req, res) {
 
   // The model only ever sees the tail of the conversation, however long it gets.
   const context = conversation.messages.slice(-CONTEXT_MESSAGES).map(({ role, content }) => ({ role, content }));
-  const messages = [{ role: 'system', content: spoken ? SYSTEM_PROMPT_VOICE : SYSTEM_PROMPT }, ...context];
+  const basePrompt = spoken ? SYSTEM_PROMPT_VOICE : SYSTEM_PROMPT;
+  const prompt = settings.allowActions ? `${basePrompt}\n\n${actions.ACTION_INSTRUCTIONS}` : basePrompt;
+  const messages = [{ role: 'system', content: prompt }, ...context];
 
   let completion;
   if (settings.chat.provider === 'builtin') {
@@ -681,17 +685,33 @@ async function handleChat(req, res) {
     completion = await zai.chat.completions.create({ messages, thinking: { type: 'disabled' } });
   }
 
-  const reply = extractReply(completion);
-  if (!reply) throw new Error('The model returned an empty reply');
+  const raw = extractReply(completion);
+  if (!raw) throw new Error('The model returned an empty reply');
 
+  // Only look for an action when the user has allowed them; otherwise the
+  // syntax is just text, and text is all it stays.
+  const parsed = settings.allowActions
+    ? actions.extractAction(raw)
+    : { reply: raw, action: null, refused: null };
+
+  // What goes in the history is what was said, not the machinery. A model that
+  // writes nothing but the marker — which the small one usually does, having been
+  // shown examples — would otherwise leave the raw `[[open_url: …]]` as its reply.
+  let reply = parsed.reply;
+  if (!reply) reply = parsed.action ? `Okay — I'll ${parsed.action.description}.` : raw;
   history.append(conversation, 'assistant', reply);
   if (settings.saveHistory) await history.persist(conversation);
+
+  if (parsed.action) console.log(`[buddy] action requested: ${parsed.action.name} → ${parsed.action.value}`);
+  if (parsed.refused) console.warn(`[buddy] ${parsed.refused}`);
 
   return sendJson(res, 200, {
     reply,
     sessionId: conversation.id,
     title: conversation.title,
     saved: settings.saveHistory,
+    action: parsed.action,
+    actionRefused: parsed.refused,
   });
 }
 
