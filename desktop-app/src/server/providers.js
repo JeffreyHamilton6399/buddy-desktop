@@ -4,9 +4,13 @@
  * Each capability — chat, speech synthesis, speech recognition — can be served
  * either by the z-ai cloud API or by something running on this machine:
  *
- *   chat  builtin │ ollama  │ z-ai      builtin = llama.cpp inside the app
- *   tts   kokoro  │ system  │ z-ai      kokoro  = neural TTS inside the app
- *   asr   local   │ whisper │ z-ai │ off  local = Whisper inside the app
+ *   chat  builtin │ ollama  │ cloud │ z-ai   builtin = llama.cpp inside the app
+ *   tts   kokoro  │ system  │ z-ai           kokoro  = neural TTS inside the app
+ *   asr   local   │ whisper │ z-ai  │ off    local = Whisper inside the app
+ *
+ * 'cloud' is any provider whose key the user has pasted — Anthropic, OpenAI,
+ * Groq, and the rest; see keys.js. ('z-ai' predates it and goes through its own
+ * bundled SDK, which is why it is still a provider of its own.)
  *
  * The defaults are the first of each, so out of the box Buddy thinks, speaks and
  * listens entirely on this machine: no key, no account, and nothing leaves the
@@ -17,32 +21,53 @@
  */
 'use strict';
 
-const path = require('path');
+const files = require('./files.js');
 
 // 'builtin' is llama.cpp inside the app — the default, so Buddy works with no
 // key and no account the moment its model has downloaded.
-const CHAT_PROVIDERS = ['builtin', 'z-ai', 'ollama'];
+const CHAT_PROVIDERS = ['builtin', 'z-ai', 'ollama', 'cloud'];
 // 'kokoro' is neural TTS inside the app; 'system' is the OS's own voices, spoken
 // in the renderer by speechSynthesis.
-const TTS_PROVIDERS = ['kokoro', 'system', 'z-ai'];
+const TTS_PROVIDERS = ['kokoro', 'system', 'cloud', 'z-ai'];
 // 'local' is Whisper inside the app. 'off' is still a real choice, not a failure:
 // typing works exactly the same, and the mic and wake word simply stay dark.
-const ASR_PROVIDERS = ['local', 'whisper', 'z-ai', 'off'];
+const ASR_PROVIDERS = ['local', 'whisper', 'cloud', 'z-ai', 'off'];
 
 // Everything defaults to this machine: Buddy's own model, its own voice, and its
 // own ears. Nothing to configure and nothing leaves the device.
 const DEFAULTS = {
-  chat: { provider: 'builtin', model: '', builtinModel: '', baseUrl: 'http://127.0.0.1:11434' },
-  tts: { provider: 'kokoro', voice: '', speed: 1 },
+  chat: {
+    provider: 'builtin',
+    model: '',
+    builtinModel: '',
+    baseUrl: 'http://127.0.0.1:11434',
+    // Which pasted key answers when provider is 'cloud', and with which model.
+    cloudProvider: '',
+    cloudModel: '',
+  },
+  tts: { provider: 'kokoro', voice: '', speed: 1, cloudProvider: '', cloudModel: '' },
   asr: {
     provider: 'local',
     baseUrl: 'http://127.0.0.1:8000/v1',
     model: 'Systran/faster-whisper-small',
     localModel: 'tiny.en',
+    cloudProvider: '',
+    cloudModel: '',
   },
   saveHistory: true,
+  /**
+   * Whether typed replies are read out loud in the panel. A real setting rather
+   * than a per-window preference, so it is the same in both windows and is
+   * where someone would look for it. The orb ignores it: talking is the whole
+   * point of the orb, and silencing it would just leave a mute circle.
+   */
+  speakReplies: true,
   // Buddy reaching outside its own window is opt-in, always.
   allowActions: false,
+  // Reading and writing files is opt-in twice over: the switch has to be on
+  // *and* at least one folder named. On its own the switch grants nothing.
+  allowFiles: false,
+  fileRoots: [],
 };
 
 /** Bumped whenever defaults change in a way an existing install should inherit. */
@@ -97,11 +122,15 @@ function normaliseSettings(raw) {
       model: text(chat.model, DEFAULTS.chat.model),
       builtinModel: text(chat.builtinModel, DEFAULTS.chat.builtinModel),
       baseUrl: text(chat.baseUrl, DEFAULTS.chat.baseUrl).replace(/\/+$/, ''),
+      cloudProvider: text(chat.cloudProvider, DEFAULTS.chat.cloudProvider),
+      cloudModel: text(chat.cloudModel, DEFAULTS.chat.cloudModel),
     },
     tts: {
       provider: pick(tts.provider, TTS_PROVIDERS, DEFAULTS.tts.provider),
       voice: text(tts.voice, DEFAULTS.tts.voice),
       speed: number(tts.speed, DEFAULTS.tts.speed, 0.6, 1.6),
+      cloudProvider: text(tts.cloudProvider, DEFAULTS.tts.cloudProvider),
+      cloudModel: text(tts.cloudModel, DEFAULTS.tts.cloudModel),
     },
     asr: {
       provider: pick(asr.provider, ASR_PROVIDERS, DEFAULTS.asr.provider),
@@ -109,16 +138,30 @@ function normaliseSettings(raw) {
       model: text(asr.model, DEFAULTS.asr.model),
       // Which size of the in-app Whisper to use; validated by hearing.js.
       localModel: text(asr.localModel, DEFAULTS.asr.localModel),
+      cloudProvider: text(asr.cloudProvider, DEFAULTS.asr.cloudProvider),
+      cloudModel: text(asr.cloudModel, DEFAULTS.asr.cloudModel),
     },
     saveHistory: input.saveHistory !== false,
-    // Defaults to false rather than true: this one has to be asked for.
+    speakReplies: input.speakReplies !== false,
+    // Default to false rather than true: these have to be asked for.
     allowActions: input.allowActions === true,
+    allowFiles: input.allowFiles === true,
+    fileRoots: files.normaliseRoots(input.fileRoots),
   };
+}
+
+/** True when a capability is answered by somebody else's server. */
+function isCloud(provider) {
+  return provider === 'cloud' || provider === 'z-ai';
+}
+
+function usesCloudChat(settings) {
+  return isCloud(settings.chat.provider);
 }
 
 /** True when no capability touches the network. */
 function isFullyLocal(settings) {
-  return settings.chat.provider !== 'z-ai' && settings.tts.provider !== 'z-ai' && settings.asr.provider !== 'z-ai';
+  return !isCloud(settings.chat.provider) && !isCloud(settings.tts.provider) && !isCloud(settings.asr.provider);
 }
 
 /** True when speaking and listening are done by the models inside the app. */
@@ -138,9 +181,9 @@ function usesBuiltinModel(settings) {
 /** Which capabilities still reach the cloud — used for honest in-app copy. */
 function cloudCapabilities(settings) {
   const cloud = [];
-  if (settings.chat.provider === 'z-ai') cloud.push('chat');
-  if (settings.tts.provider === 'z-ai') cloud.push('tts');
-  if (settings.asr.provider === 'z-ai') cloud.push('asr');
+  if (isCloud(settings.chat.provider)) cloud.push('chat');
+  if (isCloud(settings.tts.provider)) cloud.push('tts');
+  if (isCloud(settings.asr.provider)) cloud.push('asr');
   return cloud;
 }
 
@@ -280,6 +323,8 @@ async function probeProviders(settings) {
 
 module.exports = {
   usesBuiltinModel,
+  usesCloudChat,
+  isCloud,
   usesLocalVoice,
   usesLocalHearing,
   CHAT_PROVIDERS,

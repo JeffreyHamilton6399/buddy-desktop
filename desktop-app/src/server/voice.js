@@ -27,13 +27,6 @@ const WEIGHTS_FILE = 'model_fp16.onnx';
 const MIN_WEIGHTS_BYTES = 100 * 1024 * 1024; // a truncated download must not read as ready
 
 const DEFAULT_VOICE = 'af_heart';
-/**
- * What Buddy says when the wake word fires. Lives here rather than in the
- * renderer so warm-up can render it in advance: the first "Hey Buddy" of a
- * session would otherwise wait about a second for it, and an assistant that
- * hesitates before saying hello does not feel like it was listening.
- */
-const GREETING = 'Yeah? What would you like?';
 const IDLE_UNLOAD_MS = 10 * 60 * 1000;
 /** Short lines like the wake-word greeting are said over and over — keep them. */
 const CACHE_LIMIT = 24;
@@ -112,17 +105,19 @@ function unload() {
 }
 
 /**
- * Pull the model into memory ahead of time, so the first reply is not slow, and
- * render the wake greeting while we are here — it is the one line whose latency
- * the user will notice most.
+ * Pull the model into memory ahead of time, and run one throwaway line through
+ * it. Loading the weights is not the whole cost: the very first generation pays
+ * an extra ~0.8s setting the ONNX session up, and that is worth spending while
+ * nobody is waiting rather than on the first thing Buddy is asked.
+ *
+ * The line is deliberately not anything Buddy says, so it does not sit in the
+ * render cache taking up a slot that a real repeated phrase could use.
  */
 async function warmUp(configDir, options = {}) {
   await load(configDir);
-  if (options.greetingVoice !== null) {
-    await speak({ configDir, text: GREETING, voice: options.greetingVoice }).catch(() => {
-      /* a failed pre-render just means the first greeting is a second slower */
-    });
-  }
+  await speak({ configDir, text: 'Ready.', voice: options.voice }).catch(() => {
+    /* a failed warm-up just means the first real line is a second slower */
+  });
   scheduleIdleUnload();
 }
 
@@ -171,14 +166,25 @@ function speakableText(source) {
  * about half a second after a reply lands instead of after the whole thing has
  * been synthesized.
  *
- * The limits are deliberately short, and the first one shorter still: synthesis
- * runs at under 2x realtime on a plain CPU, so the opening chunk is what the user
- * actually waits through before hearing anything. 70 characters gets the first
- * word out in about a second, while later chunks can be longer because they are
- * being made while the previous one is still playing. Only genuinely short
- * fragments are merged, so the pauses still land on sentence ends.
+ * The limits are deliberately short, and the first one shorter still: the
+ * opening chunk is the only one the user actually waits through, because every
+ * later one is made while the previous is still playing.
+ *
+ * Measured here (fp16, Vulkan-less CPU path): ~0.032s of synthesis per
+ * character, against ~0.065s of speech per character — so roughly 2x realtime.
+ * That gives the two numbers below:
+ *
+ *   firstLimit 42  the wait before Buddy starts talking, ~1.3s rather than the
+ *                  ~2.2s that 70 characters cost
+ *   limit     120  a later chunk must synthesize faster than the one before it
+ *                  plays, or the pipeline falls behind and Buddy pauses
+ *                  mid-sentence. At 2x realtime that means no chunk may be more
+ *                  than about twice its predecessor; 120 against a 42-character
+ *                  opener keeps a margin.
+ *
+ * Only genuinely short fragments are merged, so pauses still land on sentence ends.
  */
-function chunkForSpeech(source, limit = 150, firstLimit = 70) {
+function chunkForSpeech(source, limit = 120, firstLimit = 42) {
   const text = speakableText(source);
   if (!text) return [];
 
@@ -187,7 +193,30 @@ function chunkForSpeech(source, limit = 150, firstLimit = 70) {
   let current = '';
   /** Below this a fragment is too short to be worth a pause of its own. */
   const MERGE_UNDER = 45;
-  const ceiling = () => (chunks.length === 0 ? firstLimit : limit);
+  /**
+   * A first chunk shorter than this does not buy enough playback time to cover
+   * making the second one, so Buddy says "Sure." and then stops dead for a
+   * couple of seconds. Below this it gets merged forward instead.
+   */
+  const MIN_FIRST = 24;
+
+  /**
+   * The ceiling grows to match what is already playing.
+   *
+   * Speech plays at ~0.065s per character and synthesizes at ~0.032s, so the
+   * chunk currently playing covers the making of the next one only while the
+   * next is no more than about twice its length. That makes the limit a
+   * function of the previous chunk rather than a fixed ramp: a short opener
+   * ("Sure thing.") earns a short follow-up, and the allowance doubles each
+   * time until it reaches the cap. A fixed ramp got this wrong in exactly the
+   * case that matters — a brief first chunk followed by a long second one,
+   * where Buddy starts talking quickly and then stops dead.
+   */
+  const ceiling = () => {
+    if (chunks.length === 0) return firstLimit;
+    const previous = chunks[chunks.length - 1].length;
+    return Math.max(firstLimit, Math.min(limit, Math.round(previous * 1.9)));
+  };
 
   for (const raw of sentences) {
     const sentence = raw.trim();
@@ -198,13 +227,33 @@ function chunkForSpeech(source, limit = 150, firstLimit = 70) {
         chunks.push(current);
         current = '';
       }
-      // Too long to say in one go and no sentence end to split on — break it on
-      // the commas, and failing that just take it in bites.
+
+      /** A sentence barely over the line is better said whole than broken. */
+      const OVERSHOOT = 1.15;
+      if (sentence.length <= ceiling() * OVERSHOOT) {
+        chunks.push(sentence);
+        continue;
+      }
+
+      /**
+       * Genuinely too long, with no sentence end to split on. Break on a comma,
+       * then on a word boundary, never mid-word — clipping the audio at
+       * "Thursday afternoo" is worse than any wait it saves.
+       *
+       * The comma search reaches a little past the ceiling on purpose. The
+       * natural break in "…on Thursday afternoon, and you have…" is one
+       * character too late; taking it costs a few hundredths of a second and
+       * saves a pause landing in the middle of a phrase.
+       */
+      const COMMA_REACH = 1.25;
       let rest = sentence;
-      while (rest.length > ceiling()) {
+      while (rest.length > ceiling() * OVERSHOOT) {
         const at = ceiling();
-        const cut = rest.lastIndexOf(',', at);
-        const split = cut > at * 0.4 ? cut + 1 : at;
+        const comma = rest.lastIndexOf(',', Math.round(at * COMMA_REACH));
+        const space = rest.lastIndexOf(' ', at);
+        let split = at;
+        if (comma > at * 0.4) split = comma + 1;
+        else if (space > at * 0.4) split = space;
         chunks.push(rest.slice(0, split).trim());
         rest = rest.slice(split).trim();
       }
@@ -224,6 +273,21 @@ function chunkForSpeech(source, limit = 150, firstLimit = 70) {
   }
 
   if (current) chunks.push(current);
+
+  // A tiny opener ("Sure.", "Yes.") is over before the next chunk is ready, so
+  // fold it forward when there is room. Only the first — later chunks always
+  // have the whole of the one before them playing as cover.
+  // The result still has to be a short opener, or folding forward just moves
+  // the wait rather than removing it.
+  const MERGED_FIRST_MAX = Math.round(firstLimit * 1.5);
+  if (
+    chunks.length > 1 &&
+    chunks[0].length < MIN_FIRST &&
+    chunks[0].length + chunks[1].length + 1 <= MERGED_FIRST_MAX
+  ) {
+    chunks.splice(0, 2, `${chunks[0]} ${chunks[1]}`);
+  }
+
   return chunks;
 }
 
@@ -290,7 +354,6 @@ async function listVoices(configDir) {
 module.exports = {
   MODEL_ID,
   DEFAULT_VOICE,
-  GREETING,
   isReady,
   load,
   warmUp,

@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('buddy', {
   openExternal: (url) => ipcRenderer.send('buddy:open-external', String(url)),
   openConfigFolder: () => ipcRenderer.send('buddy:open-config-folder'),
 
+  /** Native folder picker, for choosing where Buddy may read and write. */
+  pickFolder: () => ipcRenderer.invoke('buddy:pick-folder'),
+
   /** Carry out an action the model asked for. Re-validated in the main process. */
   runAction: (action) => ipcRenderer.invoke('buddy:run-action', action),
 

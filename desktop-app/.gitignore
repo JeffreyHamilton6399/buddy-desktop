@@ -3,9 +3,15 @@ dist/
 out/
 release/
 
-# Never commit a real key.
+# Never commit a real key. `npm run server` uses the working directory as its
+# config dir, so running it from here drops all of these into the repo.
 .z-ai-config
+buddy-keys.json
+buddy-settings.json
 buddy-state.json
+chats/
+models/
+hf/
 
 *.log
 npm-debug.log*

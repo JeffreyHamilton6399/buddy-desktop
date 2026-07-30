@@ -74,9 +74,19 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
 
   // ── brain: the model picker ─────────────────────────────────────────────
 
-  function modelCard(entry) {
+  /**
+   * @param entry one model from /models
+   * @param provider which provider is actually answering right now
+   *
+   * `entry.active` only means "this is the built-in model Buddy would use" —
+   * it stays true while a cloud provider is doing the answering. Reading it as
+   * "answering now" is what left the local models badged and buttonless after
+   * a switch to the cloud, with no way back.
+   */
+  function modelCard(entry, provider) {
+    const answering = provider === 'builtin' && entry.active;
     const card = document.createElement('div');
-    card.className = 'card' + (entry.active ? ' is-active' : '');
+    card.className = 'card' + (answering ? ' is-active' : '');
 
     const head = document.createElement('div');
     head.className = 'card-head';
@@ -109,7 +119,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
         entry.status === 'verifying' ? 'Checking the download…' : describeProgress(entry) || 'Starting…';
       foot.append(bar, line);
     } else if (entry.ready) {
-      if (entry.active) {
+      if (answering) {
         const badge = document.createElement('span');
         badge.className = 'badge';
         badge.textContent = 'Answering now';
@@ -122,9 +132,10 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
         use.addEventListener('click', async () => {
           use.disabled = true;
           if (await save({ chat: { provider: 'builtin', builtinModel: entry.model.id } })) {
-            setNote(`${entry.model.label} will answer from now on.`);
+            setNote(`${entry.model.label} will answer from now on, on this machine.`);
           }
-          await renderModels();
+          await refreshRuntime();
+          await renderAll();
         });
         foot.appendChild(use);
       }
@@ -163,10 +174,15 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       });
       foot.appendChild(get);
 
-      if (entry.memoryHint) {
+      if (entry.model.memoryHint) {
         const hint = document.createElement('span');
-        hint.className = 'card-note';
-        hint.textContent = `Needs ${entry.memoryHint}`;
+        // Saying a model wants more memory than this machine has is the whole
+        // point of listing a dozen of them — otherwise the extra choice is just
+        // a longer way to download something that will swap.
+        hint.className = entry.fits ? 'card-note' : 'card-note bad';
+        hint.textContent = entry.fits
+          ? `Needs ${entry.model.memoryHint}`
+          : `Needs ${entry.model.memoryHint} — more than this computer has`;
         foot.appendChild(hint);
       }
     }
@@ -182,6 +198,33 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     return card;
   }
 
+  /**
+   * Does a model match what is typed in the search box?
+   *
+   * Matches across the name, the description, the size and the tags, so
+   * "small", "code", "qwen" and "writing" all find something sensible — a
+   * library of a dozen is only better than a list of four if you can get to the
+   * one you want without reading all of them.
+   */
+  function matchesSearch(entry) {
+    const needle = $('model-search').value.trim().toLowerCase();
+    if (!needle) return true;
+    const haystack = [
+      entry.model.label,
+      entry.model.blurb,
+      entry.model.parameters,
+      ...(entry.model.tags || []),
+      entry.ready ? 'downloaded installed' : '',
+      entry.fits ? '' : 'too big',
+    ]
+      .join(' ')
+      .toLowerCase();
+    // Every word has to appear somewhere, so "small chat" narrows rather than widens.
+    return needle.split(/\s+/).every((word) => haystack.includes(word));
+  }
+
+  $('model-search').addEventListener('input', () => renderModels());
+
   async function renderModels() {
     let payload;
     try {
@@ -192,7 +235,15 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     }
 
     const list = $('model-list');
-    list.replaceChildren(...payload.models.map(modelCard));
+    const matching = payload.models.filter(matchesSearch);
+    list.replaceChildren(...matching.map((entry) => modelCard(entry, payload.provider)));
+
+    if (!matching.length) {
+      const empty = document.createElement('p');
+      empty.className = 'pane-lede';
+      empty.textContent = `Nothing matches “${$('model-search').value.trim()}”.`;
+      list.appendChild(empty);
+    }
 
     // ── Ollama, if it is running ──
     const lede = $('ollama-lede');
@@ -251,22 +302,268 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     }
   }
 
-  $('use-cloud').addEventListener('click', async () => {
-    if (
-      await save({
-        chat: { provider: 'z-ai' },
-        tts: { provider: 'z-ai' },
-        asr: { provider: 'z-ai' },
-      })
-    ) {
-      setNote('Switched to the cloud. It needs an API key in Buddy’s config file to work.');
+  // ── on this machine, or in the cloud ────────────────────────────────────
+
+  /** Which of the two choices is lit, and what the line underneath says. */
+  function applyRuns() {
+    const inCloud = runtime.providers.chat === 'cloud' || runtime.providers.chat === 'z-ai';
+    $('run-local').classList.toggle('is-on', !inCloud);
+    $('run-cloud').classList.toggle('is-on', inCloud);
+    $('run-local').setAttribute('aria-pressed', String(!inCloud));
+    $('run-cloud').setAttribute('aria-pressed', String(inCloud));
+
+    const note = $('runs-note');
+    if (!inCloud) {
+      note.textContent =
+        runtime.providers.chat === 'ollama'
+          ? `Answering with ${runtime.chatModel} through Ollama, on this machine.`
+          : `Answering with ${runtime.chatModel}, on this machine.`;
+      note.classList.remove('bad');
+      return;
+    }
+    if (runtime.needsKey) {
+      note.textContent = 'Set to use the cloud, but no API key is saved for it. Add one below.';
+      note.classList.add('bad');
+      return;
+    }
+    note.textContent = `Answering with ${runtime.chatModel}. What you say is sent to them.`;
+    note.classList.remove('bad');
+  }
+
+  $('run-local').addEventListener('click', async () => {
+    if (runtime.providers.chat === 'builtin' || runtime.providers.chat === 'ollama') return;
+    if (await save({ chat: { provider: 'builtin' } })) {
+      setNote('Back to the model on this machine. Nothing leaves the device.');
+      await refreshRuntime();
       await renderAll();
     }
   });
 
+  $('run-cloud').addEventListener('click', async () => {
+    const saved = runtime.keys || [];
+    if (!saved.length) {
+      setNote('Add an API key below first — then Buddy can use it.', true);
+      $('key-input').focus();
+      return;
+    }
+    // Whatever was in use last, or the only one there is.
+    const pick = saved.find((entry) => entry.id === runtime.cloudProvider) || saved[0];
+    if (await save({ chat: { provider: 'cloud', cloudProvider: pick.id, cloudModel: pick.model } })) {
+      setNote(`${pick.label} will answer from now on.`);
+      await refreshRuntime();
+      await renderAll();
+    }
+  });
+
+  // ── API keys ────────────────────────────────────────────────────────────
+
+  /** Models per provider, fetched once per settings visit rather than per poll. */
+  const modelCache = new Map();
+
+  function setKeyNote(text, bad) {
+    const note = $('key-note');
+    note.textContent = text || '';
+    note.classList.toggle('bad', Boolean(bad));
+  }
+
+  /** The providers Buddy knows the endpoint for, fetched once. */
+  let catalog = null;
+
+  async function loadCatalog() {
+    if (catalog) return catalog;
+    try {
+      const payload = await api('/keys');
+      catalog = payload.catalog || [];
+    } catch {
+      catalog = [];
+    }
+    return catalog;
+  }
+
+  /** Offer the list of providers by name, plus the escape hatch at the end. */
+  async function askWhoIssuedIt() {
+    const select = $('key-provider');
+    const known = await loadCatalog();
+    if (select.options.length !== known.length + 1) {
+      select.replaceChildren(
+        ...known.map((entry) => new Option(entry.hint ? `${entry.label} — ${entry.hint}` : entry.label, entry.id)),
+        new Option('Something else (OpenAI-compatible)', 'custom')
+      );
+    }
+    $('key-provider-row').hidden = false;
+    select.focus();
+  }
+
+  // Only the catch-all needs an address typed out; the rest Buddy already knows.
+  $('key-provider').addEventListener('change', (event) => {
+    $('key-baseurl-row').hidden = event.target.value !== 'custom';
+  });
+
+  function resetKeyForm() {
+    $('key-input').value = '';
+    $('key-baseurl').value = '';
+    $('key-provider-row').hidden = true;
+    $('key-baseurl-row').hidden = true;
+  }
+
+  async function addKey() {
+    const button = $('key-save');
+    const field = $('key-input');
+    const apiKey = field.value.trim();
+    if (!apiKey) {
+      setKeyNote('Paste a key first.', true);
+      field.focus();
+      return;
+    }
+
+    button.disabled = true;
+    setKeyNote('Checking that key…');
+    try {
+      const baseUrl = $('key-baseurl').value.trim();
+      // Only sent once the user has actually been asked — otherwise Buddy
+      // should get one guess at it from the key itself.
+      const provider = $('key-provider-row').hidden ? '' : $('key-provider').value;
+      const result = await api('/keys', {
+        apiKey,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(provider ? { provider } : {}),
+      });
+      resetKeyForm();
+      modelCache.delete(result.provider.id);
+      setKeyNote(`Saved. That is ${result.provider.label} — Buddy can use it now.`);
+      await refreshRuntime();
+      await renderAll();
+    } catch (error) {
+      // An unrecognised key is not a failure, it is a follow-up question.
+      const payload = error.payload || {};
+      if (payload.needsProvider) await askWhoIssuedIt();
+      if (payload.needsBaseUrl) {
+        $('key-baseurl-row').hidden = false;
+        $('key-baseurl').focus();
+      }
+      setKeyNote(error.message, true);
+    }
+    button.disabled = false;
+  }
+
+  $('key-save').addEventListener('click', addKey);
+  $('key-input').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') addKey();
+  });
+
+  /** The models one saved key can reach, cached so the picker is not a poll. */
+  async function modelsFor(id) {
+    if (modelCache.has(id)) return modelCache.get(id);
+    try {
+      const { models } = await api(`/keys/${id}/models`);
+      modelCache.set(id, models || []);
+    } catch {
+      modelCache.set(id, []);
+    }
+    return modelCache.get(id);
+  }
+
+  function keyCard(entry) {
+    const answering = runtime.providers.chat === 'cloud' && runtime.cloudProvider === entry.id;
+
+    const card = document.createElement('div');
+    card.className = 'card' + (answering ? ' is-active' : '');
+
+    const head = document.createElement('div');
+    head.className = 'card-head';
+    const title = document.createElement('strong');
+    title.textContent = entry.label;
+    const masked = document.createElement('span');
+    masked.className = 'card-size';
+    masked.textContent = entry.maskedKey;
+    head.append(title, masked);
+
+    const blurb = document.createElement('p');
+    blurb.className = 'card-blurb';
+    blurb.textContent = entry.hint ? `${entry.hint} · ${entry.baseUrl}` : entry.baseUrl;
+
+    const foot = document.createElement('div');
+    foot.className = 'card-foot';
+
+    // Which model of theirs to use. Filled in from the provider's own list, so
+    // a model that has since been retired cannot be left selected.
+    const picker = document.createElement('select');
+    picker.className = 'key-model';
+    picker.setAttribute('aria-label', `Model for ${entry.label}`);
+    picker.replaceChildren(new Option(entry.model || 'Loading models…', entry.model || ''));
+    modelsFor(entry.id).then((models) => {
+      if (!models.length) return;
+      const selected = answering ? runtime.cloudModel || entry.model : entry.model;
+      picker.replaceChildren(...models.map((id) => new Option(id, id, false, id === selected)));
+      if (selected && !models.includes(selected)) picker.prepend(new Option(selected, selected, false, true));
+      picker.value = selected || models[0];
+    });
+    picker.addEventListener('change', async () => {
+      // Picking a model for a provider that is not answering must not quietly
+      // switch Buddy over to it — the choice is carried by "Use this one"
+      // instead. Only the live provider writes straight through.
+      if (!answering) return;
+      if (await save({ chat: { cloudModel: picker.value } })) setNote(`Now using ${picker.value}.`);
+    });
+    foot.appendChild(picker);
+
+    if (answering) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = 'Answering now';
+      foot.appendChild(badge);
+    } else {
+      const use = document.createElement('button');
+      use.className = 'btn primary';
+      use.type = 'button';
+      use.textContent = 'Use this one';
+      use.addEventListener('click', async () => {
+        use.disabled = true;
+        if (await save({ chat: { provider: 'cloud', cloudProvider: entry.id, cloudModel: picker.value } })) {
+          setNote(`${entry.label} will answer from now on.`);
+        }
+        await refreshRuntime();
+        await renderAll();
+      });
+      foot.appendChild(use);
+    }
+
+    const forget = document.createElement('button');
+    forget.className = 'btn ghost';
+    forget.type = 'button';
+    forget.textContent = 'Forget';
+    forget.title = 'Delete this key from this computer';
+    forget.addEventListener('click', async () => {
+      forget.disabled = true;
+      try {
+        await api(`/keys/${entry.id}`, undefined, { method: 'DELETE' });
+        modelCache.delete(entry.id);
+        setKeyNote(`Forgot the ${entry.label} key.`);
+      } catch (error) {
+        setKeyNote(error.message, true);
+      }
+      await refreshRuntime();
+      await renderAll();
+    });
+    foot.appendChild(forget);
+
+    card.append(head, blurb, foot);
+    return card;
+  }
+
+  function renderKeys() {
+    const list = $('key-list');
+    const saved = runtime.keys || [];
+    if (!saved.length) {
+      list.replaceChildren();
+      return;
+    }
+    list.replaceChildren(...saved.map(keyCard));
+  }
+
   // ── voice ───────────────────────────────────────────────────────────────
 
-  async function loadKokoroVoices() {
+  async function loadVoices() {
     const select = $('tts-voice');
     try {
       const { voices, selected, needsDownload } = await api('/voices');
@@ -304,24 +601,87 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     );
   }
 
+  /**
+   * Fill a provider picker with the saved keys that can do a given job, and
+   * say so plainly when there are none. An empty dropdown with no explanation
+   * is the worst version of this — it looks broken rather than unconfigured.
+   */
+  function fillCloudProviders(select, available, selected) {
+    if (!available.length) {
+      select.replaceChildren(new Option('No key you have added can do this', ''));
+      select.disabled = true;
+      return;
+    }
+    select.disabled = false;
+    select.replaceChildren(
+      ...available.map((entry) => new Option(entry.label, entry.id, false, entry.id === selected))
+    );
+    if (selected && available.some((entry) => entry.id === selected)) select.value = selected;
+  }
+
+  $('speak-replies').addEventListener('change', async (event) => {
+    if (!(await save({ speakReplies: event.target.checked }))) {
+      event.target.checked = !event.target.checked;
+      return;
+    }
+    await refreshRuntime();
+    setNote(event.target.checked ? 'Replies will be read out loud.' : 'Replies will be text only.');
+  });
+
   function applyVoicePanes() {
     const provider = runtime.providers.tts;
+    $('speak-replies').checked = runtime.speakReplies !== false;
     $('tts-provider').value = provider;
-    $('kokoro-options').hidden = provider !== 'kokoro';
+    // The voice picker and the speed slider serve the in-app voice and a cloud
+    // one equally; only the OS voices have their own list.
+    $('kokoro-options').hidden = provider !== 'kokoro' && provider !== 'cloud';
     $('system-options').hidden = provider !== 'system';
+    $('tts-cloud-options').hidden = provider !== 'cloud';
+    if (provider === 'cloud') {
+      fillCloudProviders($('tts-cloud-provider'), runtime.ttsProviders || [], runtime.ttsCloudProvider);
+    }
     $('tts-speed').value = String(runtime.ttsSpeed || 1);
     $('tts-speed-value').textContent = `${Number(runtime.ttsSpeed || 1).toFixed(2)}x`;
   }
 
   $('tts-provider').addEventListener('change', async (event) => {
     const provider = event.target.value;
-    // A Kokoro voice id means nothing to speechSynthesis and vice versa.
-    if (await save({ tts: { provider, voice: '' } })) {
+    // A Kokoro voice id means nothing to speechSynthesis, or to OpenAI, and so
+    // on in every direction — so the voice is always cleared on a switch.
+    const patch = { provider, voice: '' };
+    if (provider === 'cloud' && !runtime.ttsCloudProvider) {
+      const first = (runtime.ttsProviders || [])[0];
+      if (!first) {
+        setNote('None of the keys you have added can do speech. Add an OpenAI or Groq key first.', true);
+        $('tts-provider').value = runtime.providers.tts;
+        return;
+      }
+      patch.cloudProvider = first.id;
+    }
+    if (await save({ tts: patch })) {
       await refreshRuntime();
       applyVoicePanes();
-      if (provider === 'kokoro') await loadKokoroVoices();
+      if (provider === 'kokoro' || provider === 'cloud') await loadVoices();
       if (provider === 'system') loadSystemVoices();
       renderAssets();
+    }
+  });
+
+  $('tts-cloud-provider').addEventListener('change', async (event) => {
+    if (!event.target.value) return;
+    if (await save({ tts: { cloudProvider: event.target.value, voice: '' } })) {
+      await refreshRuntime();
+      applyVoicePanes();
+      await loadVoices();
+    }
+  });
+
+  $('asr-cloud-provider').addEventListener('change', async (event) => {
+    if (!event.target.value) return;
+    if (await save({ asr: { cloudProvider: event.target.value } })) {
+      await refreshRuntime();
+      applyHearingPanes();
+      if (onChanged) onChanged();
     }
   });
 
@@ -362,6 +722,10 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   function applyHearingPanes() {
     $('asr-provider').value = runtime.providers.asr;
     $('whisper-options').hidden = runtime.providers.asr !== 'whisper';
+    $('asr-cloud-options').hidden = runtime.providers.asr !== 'cloud';
+    if (runtime.providers.asr === 'cloud') {
+      fillCloudProviders($('asr-cloud-provider'), runtime.asrProviders || [], runtime.asrCloudProvider);
+    }
 
     // Which size of the in-app Whisper. Only relevant when that is what is listening.
     const localOptions = $('local-whisper-options');
@@ -377,8 +741,6 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
         ? 'If Buddy keeps mishearing you, the larger model is worth a try — a 73 MB download, and slower per phrase. On a synthetic headset-quality test here the two scored the same, so it is not a guaranteed fix.'
         : 'The larger model. Switch back to Faster if replies feel sluggish.';
 
-    $('allow-actions').checked = Boolean(runtime.allowActions);
-    applyActionsNote();
     const wake = $('wake-toggle');
     wake.checked = Boolean(getWakeEnabled ? getWakeEnabled() : boot.wakeEnabled);
     // Without a way to transcribe, the wake word has nothing to listen with.
@@ -386,10 +748,22 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   }
 
   $('asr-provider').addEventListener('change', async (event) => {
-    if (await save({ asr: { provider: event.target.value } })) {
+    const provider = event.target.value;
+    const patch = { provider };
+    if (provider === 'cloud' && !runtime.asrCloudProvider) {
+      const first = (runtime.asrProviders || [])[0];
+      if (!first) {
+        setNote('None of the keys you have added can transcribe. Add an OpenAI or Groq key first.', true);
+        $('asr-provider').value = runtime.providers.asr;
+        return;
+      }
+      patch.cloudProvider = first.id;
+    }
+    if (await save({ asr: patch })) {
       await refreshRuntime();
       applyHearingPanes();
       renderAssets();
+      if (onChanged) onChanged();
     }
   });
 
@@ -412,15 +786,103 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     if (event.target.value.trim()) await save({ asr: { baseUrl: event.target.value.trim() } });
   });
 
+  // ── what Buddy may do ───────────────────────────────────────────────────
+
   $('allow-actions').addEventListener('change', async (event) => {
     if (!(await save({ allowActions: event.target.checked }))) {
       event.target.checked = !event.target.checked;
       return;
     }
     await refreshRuntime();
-    applyActionsNote();
+    applyDoingPane();
     setNote(event.target.checked ? 'Buddy can open things now.' : 'Buddy can no longer open anything.');
   });
+
+  $('allow-files').addEventListener('change', async (event) => {
+    if (!(await save({ allowFiles: event.target.checked }))) {
+      event.target.checked = !event.target.checked;
+      return;
+    }
+    await refreshRuntime();
+    applyDoingPane();
+    setNote(event.target.checked ? 'Buddy can work with files now.' : 'Buddy can no longer touch files.');
+  });
+
+  $('add-file-root').addEventListener('click', async () => {
+    const chosen = await window.buddy.pickFolder();
+    if (!chosen) return;
+    const roots = [...(runtime.fileRoots || []), chosen];
+    if (await save({ fileRoots: roots })) {
+      await refreshRuntime();
+      applyDoingPane();
+      setNote('Buddy can work in that folder now.');
+    }
+  });
+
+  /**
+   * The folders Buddy may touch, with a way to take each one back.
+   *
+   * Listed in full rather than by name: "Documents" is not enough to know what
+   * you have handed over, and this is the one screen where being able to see
+   * exactly what was granted matters more than looking tidy.
+   */
+  function renderFileRoots() {
+    const list = $('file-roots');
+    const roots = runtime.fileRoots || [];
+    list.replaceChildren();
+
+    if (!roots.length) {
+      const empty = document.createElement('p');
+      empty.className = 'pane-lede';
+      empty.textContent =
+        'No folders shared yet, so Buddy cannot read or write anything — the switch above does nothing on its own.';
+      list.appendChild(empty);
+      return;
+    }
+
+    for (const root of roots) {
+      const row = document.createElement('div');
+      row.className = 'card compact';
+
+      const head = document.createElement('div');
+      head.className = 'card-head';
+      const title = document.createElement('strong');
+      title.textContent = root;
+      title.className = 'root-path';
+      head.appendChild(title);
+
+      const foot = document.createElement('div');
+      foot.className = 'card-foot';
+      const remove = document.createElement('button');
+      remove.className = 'btn ghost';
+      remove.type = 'button';
+      remove.textContent = 'Stop sharing';
+      remove.addEventListener('click', async () => {
+        remove.disabled = true;
+        if (await save({ fileRoots: roots.filter((entry) => entry !== root) })) {
+          await refreshRuntime();
+          applyDoingPane();
+          setNote('Buddy can no longer reach that folder.');
+        }
+      });
+      foot.appendChild(remove);
+
+      row.append(head, foot);
+      list.appendChild(row);
+    }
+  }
+
+  function applyDoingPane() {
+    $('allow-actions').checked = Boolean(runtime.allowActions);
+    $('allow-files').checked = Boolean(runtime.allowFiles);
+    applyActionsNote();
+    renderFileRoots();
+
+    const note = $('files-note');
+    if (!runtime.allowFiles) note.textContent = '';
+    else if (!(runtime.fileRoots || []).length) note.textContent = 'Add a folder to make this do anything.';
+    else note.textContent = 'Buddy can only ever reach these folders.';
+  }
 
   /**
    * Say plainly how well this is likely to go. Emitting a structured action on
@@ -599,7 +1061,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       renderAsset('voice', state.voice);
       renderAsset('hearing', state.hearing);
 
-      if (state.voice.ready && !voicesLoaded && runtime.providers.tts === 'kokoro') await loadKokoroVoices();
+      if (state.voice.ready && !voicesLoaded && runtime.providers.tts === 'kokoro') await loadVoices();
 
       // A download finishing changes what the rest of the app may offer, but this
       // polls every 700ms — so only tell anyone when the answer actually moves.
@@ -688,16 +1150,26 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     const facts = $('about-facts');
     facts.replaceChildren();
 
+    /** Anything answered by somebody else's server is not on this machine. */
+    const isLocal = (provider) => provider !== 'z-ai' && provider !== 'cloud';
+    /** The label of a saved key, for naming who is actually being used. */
+    const keyLabel = (id) => {
+      const found = (runtime.keys || []).find((entry) => entry.id === id);
+      return found ? found.label : 'a cloud provider';
+    };
+
     const where = [
-      ['Thinking', runtime.chatModel, runtime.providers.chat !== 'z-ai'],
+      ['Thinking', runtime.chatModel, isLocal(runtime.providers.chat)],
       [
         'Speaking',
         runtime.providers.tts === 'kokoro'
           ? 'Kokoro, in this app'
           : runtime.providers.tts === 'system'
             ? "this computer's voices"
-            : 'the z-ai cloud',
-        runtime.providers.tts !== 'z-ai',
+            : runtime.providers.tts === 'cloud'
+              ? keyLabel(runtime.ttsCloudProvider)
+              : 'the z-ai cloud',
+        isLocal(runtime.providers.tts),
       ],
       [
         'Listening',
@@ -707,8 +1179,10 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
             ? 'your own Whisper server'
             : runtime.providers.asr === 'off'
               ? 'turned off'
-              : 'the z-ai cloud',
-        runtime.providers.asr !== 'z-ai',
+              : runtime.providers.asr === 'cloud'
+                ? keyLabel(runtime.asrCloudProvider)
+                : 'the z-ai cloud',
+        isLocal(runtime.providers.asr),
       ],
     ];
 
@@ -743,10 +1217,13 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   async function renderAll() {
     applyVoicePanes();
     applyHearingPanes();
+    applyDoingPane();
+    applyRuns();
+    renderKeys();
     $('whisper-url').value = runtime.asrBaseUrl || '';
     renderAbout();
     await Promise.all([renderModels(), renderAssets(), renderChats(), renderHeard()]);
-    if (runtime.providers.tts === 'kokoro' && !voicesLoaded) await loadKokoroVoices();
+    if ((runtime.providers.tts === 'kokoro' || runtime.providers.tts === 'cloud') && !voicesLoaded) await loadVoices();
     if (runtime.providers.tts === 'system') loadSystemVoices();
   }
 
@@ -758,6 +1235,11 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     async open() {
       visible = true;
       sheet.hidden = false;
+      // Providers add and retire models; re-ask rather than trusting a list
+      // gathered the last time settings happened to be open.
+      modelCache.clear();
+      setKeyNote('');
+      resetKeyForm();
       await refreshRuntime();
       await renderAll();
       // Downloads and switches change under us, so keep the view honest while open.

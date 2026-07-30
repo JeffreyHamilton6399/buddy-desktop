@@ -25,7 +25,6 @@ export function initPanel() {
   const composer = $('composer');
   const sendButton = $('send');
   const micButton = $('mic');
-  const speakerButton = $('speaker');
   const statusLabel = $('status');
   const equalizer = $('equalizer');
 
@@ -42,7 +41,6 @@ export function initPanel() {
     sessionId = id || null;
     window.buddy.setActiveChat(sessionId);
   }
-  let speakerOn = localStorage.getItem('buddy:speaker') !== 'off';
   let microphone = null;
   let recording = false;
 
@@ -100,13 +98,10 @@ export function initPanel() {
     micButton.disabled = value || !voiceInputAvailable();
   }
 
-  function updateSpeakerButton() {
-    speakerButton.setAttribute('aria-pressed', String(speakerOn));
-    speakerButton.title = `Voice replies: ${speakerOn ? 'on' : 'off'}`;
-  }
-
   function speak(text) {
-    if (!speakerOn || !String(text || '').trim()) return;
+    // A real setting now, shared with the orb's window and the settings pane,
+    // rather than a per-window preference behind an unlabelled icon.
+    if (runtime.speakReplies === false || !String(text || '').trim()) return;
     speaker.speak(text);
   }
 
@@ -156,8 +151,15 @@ export function initPanel() {
     const note = addMessage('note', `About to ${payload.action.description}…`);
     try {
       const result = await window.buddy.runAction(payload.action);
-      note.textContent =
-        result && result.ok ? `${payload.action.done}.` : `Couldn't do that: ${(result && result.error) || 'unknown'}`;
+      if (!result || !result.ok) {
+        note.textContent = `Couldn't do that: ${(result && result.error) || 'unknown'}`;
+        return;
+      }
+      note.textContent = `${payload.action.done}.`;
+      // Reading a file or listing a folder produces something to look at, and
+      // a write says where the old version went. Shown as its own block rather
+      // than crammed into the note, because it can be a whole file.
+      if (result.detail) addMessage('note', result.detail);
     } catch (error) {
       note.textContent = `Couldn't do that: ${error.message}`;
     }
@@ -508,13 +510,6 @@ export function initPanel() {
     }
   });
 
-  speakerButton.addEventListener('click', () => {
-    speakerOn = !speakerOn;
-    localStorage.setItem('buddy:speaker', speakerOn ? 'on' : 'off');
-    updateSpeakerButton();
-    if (!speakerOn) speaker.stop();
-  });
-
   $('close-panel').addEventListener('click', () => {
     speaker.stop();
     stopRecording({ send: false });
@@ -540,8 +535,23 @@ export function initPanel() {
     input.focus();
   });
 
+  /**
+   * Stop talking. The panel has no wake word listening for someone to cut in,
+   * so interrupting here is a deliberate act: press Escape, or click the bars
+   * that are bouncing along while Buddy speaks.
+   */
+  function stopSpeaking() {
+    if (!speaker.speaking) return false;
+    speaker.stop();
+    return true;
+  }
+
+  equalizer.addEventListener('click', stopSpeaking);
+
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    // Escape means "stop that" before it means "close this".
+    if (stopSpeaking()) return;
     if (settings.visible) settings.close();
     else if (!drawer.hidden) closeDrawer();
   });
@@ -589,7 +599,6 @@ export function initPanel() {
     if (id && !sessionId) sessionId = id;
   });
 
-  updateSpeakerButton();
   applyVoiceInputAvailability();
   setStatus('online');
   greet();

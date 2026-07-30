@@ -257,22 +257,52 @@ body.flat .orb-stage::before {
 }
 
 /*
- * Speech level, driven from JS via --level. It sits behind the orb and grows
- * past it, so loud speech reads as the orb swelling rather than a meter.
+ * Speech level, driven from JS via --level on the stage: your voice while Buddy
+ * listens, Buddy's own while it answers.
+ *
+ * This uses the standalone `scale` property rather than a transform, on purpose.
+ * `transform` here is already spoken for by the keyframe animations (breathe,
+ * answering, fired), and setting it from JS would fight them. `scale` composes
+ * with those instead, so the orb keeps its idle drift and swells on top of it.
  */
-.orb-level {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 64px;
-  height: 64px;
-  margin: -32px 0 0 -32px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(52, 211, 153, 0.55), transparent 70%);
-  transform: scale(calc(1 + (var(--level, 0) * 0.55)));
-  opacity: calc(var(--level, 0) * 0.9);
-  transition: transform 90ms ease-out, opacity 140ms ease-out;
-  pointer-events: none;
+.orb {
+  scale: calc(1 + (var(--level, 0) * 0.2));
+  /* Keeps the hover/press transform transition from the base rule above. */
+  transition: transform 160ms ease, scale 90ms ease-out;
+}
+
+/*
+ * Getting out of the way.
+ *
+ * The orb sits on top of everything you are doing, so when it has nothing to
+ * say it fades back until it is barely there. It comes back the moment the
+ * pointer is near it, or the moment it hears its name — which is the whole
+ * bargain: invisible until wanted, then immediately present.
+ *
+ * It fades to a low opacity rather than to nothing. At zero it would be a
+ * transparent window you cannot find but can still click, which is worse than
+ * a faint circle you can see and aim at.
+ */
+.orb-stage {
+  transition: opacity 600ms ease;
+}
+
+.orb-stage.resting {
+  opacity: 0.16;
+}
+
+/* Coming back is quicker than going away — being summoned should feel instant. */
+.orb-stage:not(.resting) {
+  transition: opacity 120ms ease;
+}
+
+.orb-glow {
+  transition: scale 90ms ease-out;
+}
+
+/* The halo moves further than the orb, which reads as the sound coming off it. */
+.orb-glow {
+  scale: calc(1 + (var(--level, 0) * 0.38));
 }
 
 .orb-dot {
@@ -981,7 +1011,8 @@ body.flat .panel {
 }
 
 .pane select,
-.pane input[type="url"] {
+.pane input[type="url"],
+.pane input[type="password"] {
   width: 100%;
   height: 34px;
   padding: 0 9px;
@@ -994,13 +1025,15 @@ body.flat .panel {
   cursor: pointer;
 }
 
-.pane input[type="url"] {
+.pane input[type="url"],
+.pane input[type="password"] {
   cursor: text;
   user-select: text;
 }
 
 .pane select:focus,
-.pane input[type="url"]:focus {
+.pane input[type="url"]:focus,
+.pane input[type="password"]:focus {
   outline: none;
   border-color: rgba(244, 63, 94, 0.6);
   box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
@@ -1010,6 +1043,132 @@ body.flat .panel {
   width: 100%;
   accent-color: var(--rose);
   cursor: pointer;
+}
+
+/* ── on this machine / in the cloud ──────────────────────────────────────
+   Two halves of one switch, so it always reads as a choice with a way back
+   rather than a single button that only goes one direction. */
+
+.runs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.runs-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.runs-choice:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.runs-choice strong {
+  font-size: 12px;
+}
+
+.runs-choice small {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.runs-choice.is-on {
+  border-color: rgba(251, 191, 36, 0.5);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.runs-choice.is-on strong::after {
+  content: " ✓";
+  color: var(--amber);
+}
+
+/* ── pasting an API key ───────────────────────────────────────────────── */
+
+.key-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.key-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.key-add .btn {
+  flex: 0 0 auto;
+  height: 34px;
+}
+
+.key-model {
+  /* Sits in a card foot beside the buttons, so it must not stretch. */
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 220px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 9px;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.34);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.key-model:focus {
+  outline: none;
+  border-color: rgba(244, 63, 94, 0.6);
+}
+
+/*
+ * A shared folder's full path. It has to be readable in full — knowing you gave
+ * away "Documents" is not the same as knowing which one — so it wraps rather
+ * than being cut off with an ellipsis.
+ */
+/* Filter box above the model library. */
+.model-search {
+  width: 100%;
+  height: 32px;
+  margin-bottom: 9px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.34);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.model-search:focus {
+  outline: none;
+  border-color: rgba(244, 63, 94, 0.6);
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+}
+
+.model-search::-webkit-search-cancel-button {
+  cursor: pointer;
+  filter: invert(0.7);
+}
+
+.root-path {
+  font-size: 11.5px;
+  font-weight: 400;
+  word-break: break-all;
+  line-height: 1.4;
 }
 
 .row {
@@ -1619,6 +1778,19 @@ body.flat .panel {
   gap: 3px;
   height: 18px;
   padding-bottom: 2px;
+  /* It is also the stop button, so it has to look pressable. */
+  cursor: pointer;
+}
+
+.equalizer:hover i,
+.equalizer:focus-visible i {
+  opacity: 0.6;
+}
+
+.equalizer:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 .equalizer i {

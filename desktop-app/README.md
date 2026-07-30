@@ -48,13 +48,25 @@ src/
   preload.js           contextBridge → window.buddy
   renderer/
     index.html         markup for all three modes (orb · panel · setup)
-    renderer.js        chat, mic, TTS, ASR, wake word, tiny markdown renderer
+    renderer.js        entry point; picks a mode and hands over
+    core.js            shared plumbing: server access, runtime state, markdown
+    orb.js             the wake word, barge-in, and the orb's own state machine
+    panel.js           the chat window
+    settings.js        every settings pane
+    capture.js         microphone and voice detection
+    speech.js          playback, chunked, with an output-level tap for the orb
     styles.css         warm dark theme
   server/
     server.js          127.0.0.1 http server, routing and auth
-    providers.js       dispatch: builtin, ollama, system voices, whisper, z-ai
+    providers.js       dispatch: builtin, ollama, cloud, system voices, whisper
+    keys.js            pasted API keys: whose they are, and what they can do
+    cloud.js           chat, speech and transcription over OpenAI/Anthropic shapes
     builtin.js         llama.cpp in-process — the default brain
-    model.js           downloads and verifies the model file
+    model.js           the model library: downloads, verifies, and sizes them
+    voice.js           Kokoro TTS, and splitting a reply into speakable chunks
+    hearing.js         Whisper ASR in-process
+    actions.js         the fixed list of things Buddy may do, and their parsing
+    files.js           path scoping for file access — the security boundary
     history.js         saved conversations, one JSON file per chat
 scripts/
   dev.js               spawns server + electron
@@ -68,7 +80,7 @@ Useful for development; none are needed in normal use.
 | Variable | Effect |
 | --- | --- |
 | `BUDDY_PORT` | Ask the server for a specific port. Falls back to a free one if it's taken. |
-| `BUDDY_CONFIG_DIR` | Where `.z-ai-config` is read from and written to. Electron sets this to `userData`. |
+| `BUDDY_CONFIG_DIR` | Where settings, saved keys, models and chats live. Electron sets this to `userData`. |
 | `BUDDY_TOKEN` | Fixes the `X-Buddy-Token` value instead of generating one per launch. |
 | `BUDDY_TRANSPARENT` | `1` forces transparent windows, `0` forces the opaque fallback. Only relevant on Linux. |
 
@@ -85,6 +97,9 @@ Useful for development; none are needed in normal use.
   anything smaller, and the macOS job is the only one that cares — Windows and Linux build fine from
   256×256, so a too-small icon fails on exactly one of three runners. `scripts/make-icon.js` emits
   1024×1024.
-- `.z-ai-config` is **gitignored**. Never commit a real key. `.z-ai-config.example` shows the shape.
-- The z-ai SDK is loaded only in the main process — no key material reaches the renderer.
+- `buddy-keys.json` and `.z-ai-config` hold API keys, are written owner-only, and are **gitignored**.
+  Never commit a real key. Keys are read only in the main process; the renderer only ever sees a
+  masked form, and `scrub()` strips them from every error and log line.
+- File access is scoped by `server/files.js` and re-validated in `main.js` before anything touches
+  the disk. Treat both as the security boundary they are — see the tests in that file's header.
 - `package-lock.json` is committed on purpose; CI's `npm ci` and npm cache both need it.

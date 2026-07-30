@@ -19,6 +19,10 @@
  *   POST   /speech              start or resume those downloads
  *   GET    /voices              the voices Buddy can speak with
  *   POST   /setup               store the z-ai baseUrl + key
+ *   GET    /keys                which API keys are saved, masked, and for whom
+ *   POST   /keys                paste a key — Buddy works out whose it is
+ *   GET    /keys/:id/models     what that key can reach
+ *   DELETE /keys/:id            forget that key
  *   POST   /chat                send a message, get a reply
  *   POST   /tts/plan            split a reply into speakable chunks
  *   POST   /tts                 speak text (audio bytes, or a hand-off to the OS voice)
@@ -40,6 +44,8 @@ const crypto = require('crypto');
 const providers = require('./providers.js');
 const actions = require('./actions.js');
 const builtin = require('./builtin.js');
+const keyStore = require('./keys.js');
+const cloud = require('./cloud.js');
 const modelStore = require('./model.js');
 const voice = require('./voice.js');
 const hearing = require('./hearing.js');
@@ -78,6 +84,45 @@ const SYSTEM_PROMPT_VOICE =
   'short version and offer to say more.';
 
 const VOICE_REPLY_TOKENS = 120;
+const CLOUD_REPLY_TOKENS = 800;
+
+/**
+ * A model has no clock.
+ *
+ * Asked the time, it will either refuse or — worse, and much more commonly —
+ * confidently invent one from whenever its training data stopped. Neither is
+ * acceptable for something sitting on a desktop being asked "what time is it".
+ * The machine knows, so tell it, on every single turn.
+ *
+ * This goes at the very top of the system prompt because a small model reads
+ * the beginning far more reliably than the middle.
+ */
+function clockLine() {
+  const now = new Date();
+  let zone = '';
+  try {
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    /* some minimal ICU builds have no zone; the date alone is still useful */
+  }
+
+  const stamp = now.toLocaleString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  return (
+    `Right now it is ${stamp}${zone ? ` (${zone})` : ''} where the user is. ` +
+    'That is the real current date and time, read from their computer. Use it ' +
+    'directly whenever you are asked the time, the date, the day of the week, ' +
+    "someone's age, or how long until something — never say you have no way to " +
+    'know, and never guess a different date.'
+  );
+}
 
 const MAX_TTS_CHARS = 1024;
 const CONTEXT_MESSAGES = 20; // how much of a conversation the model is shown
@@ -170,7 +215,12 @@ function isConfigured() {
   // exactly when its model has finished downloading. The voice and the ears are
   // deliberately not part of this: Buddy is usable by typing while they arrive.
   if (providers.usesBuiltinModel(settings) && !modelStore.isReady(configDir(), activeModelId(settings))) return false;
-  if (providers.cloudCapabilities(settings).length === 0) return true;
+  // A pasted key answers for chat; the older z-ai path answers for any of the
+  // three, and still reads its credentials from .z-ai-config.
+  if (settings.chat.provider === 'cloud' && !keyStore.has(configDir(), settings.chat.cloudProvider)) return false;
+  const needsZai =
+    settings.chat.provider === 'z-ai' || settings.tts.provider === 'z-ai' || settings.asr.provider === 'z-ai';
+  if (!needsZai) return true;
   return Boolean(readConfig());
 }
 
@@ -223,6 +273,27 @@ async function getZai() {
 }
 
 // ── response shape helpers (providers vary; be forgiving) ─────────────────
+
+/**
+ * Reasoning models think out loud, in tags.
+ *
+ * Qwen 3, DeepSeek R1 and GPT-OSS all wrap their working in `<think>` before
+ * giving an answer. That is not something to show the user and it is certainly
+ * not something to read aloud — a spoken reply would become thirty seconds of
+ * the model talking itself through the problem. Take the answer and drop the
+ * working.
+ *
+ * An unclosed tag means the reply hit its token limit mid-thought; everything
+ * from the tag on is then working with no answer attached, so it goes too.
+ */
+function stripThinking(text) {
+  let out = String(text || '');
+  out = out.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '');
+  out = out.replace(/<(think|thinking|reasoning)>[\s\S]*$/i, '');
+  // Some builds emit only the closing tag, with the working ahead of it.
+  out = out.replace(/^[\s\S]*?<\/(think|thinking|reasoning)>/i, '');
+  return out.trim();
+}
 
 function extractReply(completion) {
   if (!completion) return '';
@@ -350,10 +421,20 @@ function readBody(req) {
 /** Never let a key, or a provider error echoing one, reach a client or a log. */
 function scrub(message) {
   const text = String(message || 'Unexpected error');
-  const config = readConfig();
   let safe = text;
+
+  const config = readConfig();
   if (config && config.apiKey) safe = safe.split(config.apiKey).join('«key»');
-  return safe.replace(/(Bearer\s+)[A-Za-z0-9._\-]+/gi, '$1«key»').slice(0, 500);
+  // Every pasted key too — providers are fond of quoting the offending key back.
+  for (const entry of keyStore.list(configDir())) {
+    const stored = keyStore.get(configDir(), entry.id);
+    if (stored && stored.apiKey) safe = safe.split(stored.apiKey).join('«key»');
+  }
+
+  return safe
+    .replace(/(Bearer\s+)[A-Za-z0-9._\-]+/gi, '$1«key»')
+    .replace(/\bsk-[A-Za-z0-9._-]{12,}/g, '«key»')
+    .slice(0, 500);
 }
 
 // ── route handlers ────────────────────────────────────────────────────────
@@ -364,21 +445,37 @@ function describeRuntime() {
   const voiceReady = voice.isReady(configDir());
   const localWhisper = hearing.resolveModel(settings.asr.localModel);
   const hearingReady = hearing.isReady(configDir(), localWhisper);
+  const savedKeys = keyStore.list(configDir());
+  const cloudKey = settings.chat.provider === 'cloud' ? keyStore.get(configDir(), settings.chat.cloudProvider) : null;
+
+  /** What to call whatever is currently answering, in one phrase. */
+  const describeChatModel = () => {
+    if (settings.chat.provider === 'builtin') return modelStore.get(modelId).label;
+    if (settings.chat.provider === 'ollama') return settings.chat.model || providers.OLLAMA_DEFAULT_MODEL;
+    if (settings.chat.provider === 'cloud') {
+      const known = keyStore.describe(settings.chat.cloudProvider);
+      const name = settings.chat.cloudModel || (cloudKey && cloudKey.model) || 'no model chosen';
+      return `${name}${known ? ` · ${known.label}` : ''}`;
+    }
+    return settings.chat.model || 'GLM · z.ai';
+  };
 
   return {
     ok: true,
     configured: isConfigured(),
     firstRun: !settingsFileExists() && !readConfig(),
-    hasKey: Boolean(readConfig()),
+    hasKey: Boolean(readConfig()) || savedKeys.length > 0,
     providers: {
       chat: settings.chat.provider,
       tts: settings.tts.provider,
       asr: settings.asr.provider,
     },
-    chatModel:
-      settings.chat.provider === 'builtin'
-        ? modelStore.get(modelId).label
-        : settings.chat.model || providers.OLLAMA_DEFAULT_MODEL,
+    // Which pasted keys are stored, masked, and which of them is answering.
+    keys: savedKeys,
+    cloudProvider: settings.chat.cloudProvider,
+    cloudModel: settings.chat.cloudModel,
+    needsKey: settings.chat.provider === 'cloud' && !cloudKey,
+    chatModel: describeChatModel(),
     model: modelStore.snapshot(configDir(), modelId),
     needsModel: providers.usesBuiltinModel(settings) && !modelStore.isReady(configDir(), modelId),
     ttsVoice: settings.tts.voice || voice.DEFAULT_VOICE,
@@ -386,18 +483,37 @@ function describeRuntime() {
     asrBaseUrl: settings.asr.baseUrl,
     asrLocalModel: localWhisper,
     asrLocalModels: Object.entries(hearing.MODELS).map(([id, entry]) => ({ id, label: entry.label })),
-    greeting: voice.GREETING,
     // Whether each capability can actually run right now, which is what decides
     // if the UI offers a microphone and whether the orb may listen at all.
-    voiceReady: settings.tts.provider === 'kokoro' ? voiceReady : true,
-    hearingReady: settings.asr.provider === 'local' ? hearingReady : settings.asr.provider !== 'off',
+    // A cloud engine is only "ready" if there is a key to reach it with —
+    // otherwise the UI offers a microphone that fails on first use.
+    voiceReady:
+      settings.tts.provider === 'kokoro'
+        ? voiceReady
+        : settings.tts.provider === 'cloud'
+          ? keyStore.has(configDir(), settings.tts.cloudProvider)
+          : true,
+    hearingReady:
+      settings.asr.provider === 'local'
+        ? hearingReady
+        : settings.asr.provider === 'cloud'
+          ? keyStore.has(configDir(), settings.asr.cloudProvider)
+          : settings.asr.provider !== 'off',
+    // Which saved keys can do speech, so the pickers only offer what works.
+    ttsProviders: keyStore.providersFor(configDir(), 'tts'),
+    asrProviders: keyStore.providersFor(configDir(), 'asr'),
+    ttsCloudProvider: settings.tts.cloudProvider,
+    asrCloudProvider: settings.asr.cloudProvider,
     speech: { voice: voice.snapshot(), hearing: hearing.snapshot() },
     needsSpeech:
       (providers.usesLocalVoice(settings) && !voiceReady) || (providers.usesLocalHearing(settings) && !hearingReady),
     cloud: providers.cloudCapabilities(settings),
     fullyLocal: providers.isFullyLocal(settings),
     saveHistory: settings.saveHistory,
+    speakReplies: settings.speakReplies,
     allowActions: settings.allowActions,
+    allowFiles: settings.allowFiles,
+    fileRoots: settings.fileRoots,
   };
 }
 
@@ -419,6 +535,110 @@ async function handleSetup(req, res) {
   resetZai();
   console.log('[buddy] z-ai credentials saved to', configPath());
   return sendJson(res, 200, { ok: true });
+}
+
+// ── pasted API keys ───────────────────────────────────────────────────────
+
+/** Every saved key, masked, plus the catalogue so the UI can name providers. */
+async function handleListKeys(_req, res) {
+  return sendJson(res, 200, {
+    keys: keyStore.list(configDir()),
+    catalog: keyStore.CATALOG.map(({ id, label, hint, baseUrl, defaultModel }) => ({
+      id,
+      label,
+      hint,
+      baseUrl,
+      defaultModel,
+    })),
+    active: readSettings().chat.cloudProvider,
+  });
+}
+
+/**
+ * Take a pasted key, work out whose it is, check it, and save it.
+ *
+ * The whole point is that this needs one field. A base URL is only ever asked
+ * for when the key belongs to nobody recognisable, and then the error says so
+ * rather than making the user guess what is missing.
+ */
+async function handleAddKey(req, res) {
+  const body = await readBody(req);
+  const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+  const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : '';
+  const chosen = typeof body.provider === 'string' ? body.provider.trim() : '';
+
+  let found;
+  try {
+    found = await keyStore.inspect({ apiKey, baseUrl, provider: chosen });
+  } catch (error) {
+    return sendJson(res, error.status || 502, {
+      error: scrub(error.message),
+      needsProvider: Boolean(error.needsProvider),
+      needsBaseUrl: Boolean(error.needsBaseUrl),
+      provider: error.provider || null,
+    });
+  }
+
+  const { provider, models } = found;
+  // Prefer a model the provider actually listed — a default that has been
+  // retired since this was written would otherwise 404 on the first message —
+  // but never something that cannot hold a conversation. Groq lists its Whisper
+  // builds here too, and picking blindly off the top of the list chose one.
+  const model = keyStore.pickChatModel(models, provider.defaultModel);
+
+  const saved = await keyStore.save(configDir(), {
+    id: provider.id,
+    apiKey,
+    baseUrl: provider.baseUrl,
+    model,
+  });
+
+  // The old z-ai path reads its own file, so keep that in step when the pasted
+  // key turns out to be a z-ai one.
+  if (provider.style === 'z-ai') {
+    await writeConfig({ apiKey, baseUrl: provider.baseUrl });
+    resetZai();
+  }
+
+  console.log(`[buddy] saved a ${provider.label} key (${keyStore.mask(apiKey)})`);
+  return sendJson(res, 200, {
+    ok: true,
+    provider: { id: provider.id, label: provider.label, hint: provider.hint, baseUrl: provider.baseUrl },
+    models,
+    model: saved.model,
+  });
+}
+
+/** The models one saved key can reach, for the picker. */
+async function handleKeyModels(_req, res, [id]) {
+  const credential = keyStore.get(configDir(), id);
+  if (!credential) return sendJson(res, 404, { error: 'No key saved for that provider.' });
+  if (credential.style === 'z-ai') return sendJson(res, 200, { models: [], selected: credential.model });
+
+  try {
+    const models = await keyStore.listModels(credential);
+    // The picker is for choosing what answers, so transcription and image
+    // models have no business being in it.
+    return sendJson(res, 200, { models: keyStore.chatModels(models), selected: credential.model });
+  } catch (error) {
+    return sendJson(res, 502, { error: scrub(error.message) });
+  }
+}
+
+async function handleRemoveKey(_req, res, [id]) {
+  const removed = await keyStore.remove(configDir(), id);
+  if (!removed) return sendJson(res, 404, { error: 'No key saved for that provider.' });
+
+  // Deleting the key that is currently answering would leave Buddy mute with no
+  // explanation, so hand the conversation back to the model on this machine.
+  const settings = readSettings();
+  if (settings.chat.provider === 'cloud' && settings.chat.cloudProvider === id) {
+    await writeSettings({ chat: { provider: 'builtin', cloudProvider: '', cloudModel: '' } });
+  }
+  if (id === 'z-ai') resetZai();
+
+  console.log(`[buddy] removed the ${id} key`);
+  return sendJson(res, 200, { ok: true, keys: keyStore.list(configDir()), runtime: describeRuntime() });
 }
 
 async function handleGetSettings(_req, res) {
@@ -550,7 +770,7 @@ async function handleSpeechDownload(req, res) {
   const settings = readSettings();
 
   if (want === 'voice' || want === 'both') {
-    voice.warmUp(configDir(), { greetingVoice: settings.tts.voice || undefined }).catch(() => {
+    voice.warmUp(configDir(), { voice: settings.tts.voice || undefined }).catch(() => {
       /* the error is already on the snapshot the client polls */
     });
   }
@@ -571,7 +791,7 @@ async function handleSpeechDownload(req, res) {
  * Measured on this machine: a reply takes 0.1s once the model is resident and
  * 11.9s when it is not, so almost everything that reads as "the AI is slow" is
  * the one-off load. The orb calls this the instant it hears its name, which
- * overlaps the load with the second or so of greeting it speaks back.
+ * overlaps the load with the moment the user spends asking their question.
  */
 async function warmEverything() {
   const settings = readSettings();
@@ -582,7 +802,7 @@ async function warmEverything() {
     if (modelStore.isReady(configDir(), id)) jobs.push(builtin.warmUp(modelStore.modelPath(configDir(), id)));
   }
   if (providers.usesLocalVoice(settings) && voice.isReady(configDir())) {
-    jobs.push(voice.warmUp(configDir(), { greetingVoice: settings.tts.voice || undefined }));
+    jobs.push(voice.warmUp(configDir(), { voice: settings.tts.voice || undefined }));
   }
   if (providers.usesLocalHearing(settings) && hearing.isReady(configDir(), settings.asr.localModel)) {
     jobs.push(hearing.warmUp(configDir(), settings.asr.localModel));
@@ -607,6 +827,16 @@ async function handleWarm(_req, res) {
 /** The voice picker's options. Needs the model on disk, so it may take a moment. */
 async function handleListVoices(_req, res) {
   const settings = readSettings();
+
+  // Whatever voices the chosen provider publishes. These are fixed lists rather
+  // than a live call: neither OpenAI nor Groq has an endpoint that enumerates
+  // them, and a free-text box just produces 404s on a typo.
+  if (settings.tts.provider === 'cloud') {
+    const known = keyStore.describe(settings.tts.cloudProvider);
+    const voices = ((known && known.ttsVoices) || []).map((id) => ({ id, name: id }));
+    return sendJson(res, 200, { provider: 'cloud', voices, selected: settings.tts.voice || (voices[0] || {}).id });
+  }
+
   if (settings.tts.provider !== 'kokoro') {
     // The OS voices are only enumerable in the renderer, and z-ai's are fixed.
     return sendJson(res, 200, { provider: settings.tts.provider, voices: [], selected: settings.tts.voice });
@@ -624,6 +854,26 @@ async function handleListVoices(_req, res) {
 async function handleProviderStatus(_req, res) {
   const status = await providers.probeProviders(readSettings());
   return sendJson(res, 200, status);
+}
+
+/**
+ * Should the action instructions go on every turn, or only when the message
+ * looks like a request?
+ *
+ * The keyword gate exists for one reason: handed the instructions on every
+ * turn, a 1B model forgets its actual job — asked "what is 2+2?" it opens
+ * Google. Anything of a reasonable size holds both at once, and for those the
+ * gate is pure downside. "I need the weather forecast for tomorrow" contains no
+ * word on the list, so a capable model never gets told it *could* search, and
+ * invents a forecast instead. That is worse than the problem the gate solves.
+ *
+ * So: a cloud model, an Ollama model, or a local model of 4B or more always
+ * gets the instructions. Only the genuinely small ones keep the keyword gate.
+ */
+function alwaysOffersActions(settings) {
+  if (settings.chat.provider !== 'builtin') return true;
+  const parameters = Number.parseFloat(modelStore.get(activeModelId(settings)).parameters);
+  return Number.isFinite(parameters) && parameters >= 4;
 }
 
 async function handleChat(req, res) {
@@ -664,8 +914,12 @@ async function handleChat(req, res) {
   // request to do something — see looksLikeRequest for why carrying them on every
   // turn makes a small model markedly worse at ordinary conversation.
   const lastSaid = [...conversation.messages].reverse().find((message) => message.role === 'user');
-  const wantsAction = settings.allowActions && actions.looksLikeRequest(lastSaid && lastSaid.content);
-  const prompt = wantsAction ? `${basePrompt}\n\n${actions.ACTION_INSTRUCTIONS}` : basePrompt;
+  const permissions = { allowFiles: settings.allowFiles, fileRoots: settings.fileRoots };
+  const wantsAction =
+    settings.allowActions &&
+    (alwaysOffersActions(settings) || actions.looksLikeRequest(lastSaid && lastSaid.content, permissions));
+  const withClock = `${clockLine()}\n\n${basePrompt}`;
+  const prompt = wantsAction ? `${withClock}\n\n${actions.instructionsFor(permissions)}` : withClock;
   const messages = [{ role: 'system', content: prompt }, ...context];
 
   let completion;
@@ -689,17 +943,33 @@ async function handleChat(req, res) {
       model: settings.chat.model,
       messages,
     });
+  } else if (settings.chat.provider === 'cloud') {
+    const credential = keyStore.get(configDir(), settings.chat.cloudProvider);
+    if (!credential) {
+      return sendJson(res, 503, {
+        error: 'That cloud provider has no API key saved. Add one under Brain in settings.',
+        needsKey: true,
+      });
+    }
+    completion = await cloud.chat({
+      credential,
+      model: settings.chat.cloudModel,
+      messages,
+      maxTokens: spoken ? VOICE_REPLY_TOKENS : CLOUD_REPLY_TOKENS,
+    });
   } else {
     const zai = await getZai();
     completion = await zai.chat.completions.create({ messages, thinking: { type: 'disabled' } });
   }
 
-  const raw = extractReply(completion);
+  const raw = stripThinking(extractReply(completion));
   if (!raw) throw new Error('The model returned an empty reply');
 
   // Only look for an action when the user has allowed them; otherwise the
   // syntax is just text, and text is all it stays.
-  const parsed = wantsAction ? actions.extractAction(raw) : { reply: raw, action: null, refused: null };
+  const parsed = wantsAction
+    ? actions.extractAction(raw, permissions)
+    : { reply: raw, action: null, refused: null };
 
   // What goes in the history is what was said, not the machinery. A model that
   // writes nothing but the marker — which the small one usually does, having been
@@ -777,6 +1047,31 @@ async function handleTts(req, res) {
   // speechSynthesis say it. Nothing leaves the machine on this path either.
   if (settings.tts.provider === 'system') {
     return sendJson(res, 200, { mode: 'system', text: voice.speakableText(input), voice: chosenVoice });
+  }
+
+  // A voice from whichever key the user pasted.
+  if (settings.tts.provider === 'cloud') {
+    const credential = keyStore.get(configDir(), settings.tts.cloudProvider);
+    if (!credential) {
+      return sendJson(res, 503, {
+        error: 'That cloud voice has no API key saved. Add one under Brain in settings.',
+        needsKey: true,
+      });
+    }
+    const known = keyStore.describe(settings.tts.cloudProvider);
+    const spoken = await cloud.speak({
+      credential,
+      model: settings.tts.cloudModel || (known && known.ttsModel),
+      voice: chosenVoice || (known && known.ttsVoices && known.ttsVoices[0]),
+      input: voice.speakableText(input),
+      speed: settings.tts.speed,
+    });
+    res.writeHead(200, {
+      'Content-Type': spoken.contentType,
+      'Content-Length': spoken.audio.length,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(spoken.audio);
   }
 
   const zai = await getZai();
@@ -873,6 +1168,24 @@ async function handleAsr(req, res) {
           mimeType: typeof body.mimeType === 'string' ? body.mimeType : 'audio/webm',
         };
 
+  if (settings.asr.provider === 'cloud') {
+    const credential = keyStore.get(configDir(), settings.asr.cloudProvider);
+    if (!credential) {
+      return sendJson(res, 503, {
+        error: 'That cloud transcription has no API key saved. Add one under Brain in settings.',
+        needsKey: true,
+      });
+    }
+    const known = keyStore.describe(settings.asr.cloudProvider);
+    const text = await cloud.transcribe({
+      credential,
+      model: settings.asr.cloudModel || (known && known.asrModel),
+      audio: clip.bytes,
+      mimeType: clip.mimeType,
+    });
+    return sendJson(res, 200, { text: hearing.meaningfulText(text) });
+  }
+
   if (settings.asr.provider === 'whisper') {
     const result = await providers.whisperTranscribe({
       baseUrl: settings.asr.baseUrl,
@@ -932,6 +1245,7 @@ async function handleClearChats(_req, res) {
 
 const UUID = '([0-9a-fA-F-]{36})';
 const MODEL_ID = '([a-z0-9][a-z0-9._-]{0,63})';
+const PROVIDER_ID = '([a-z0-9][a-z0-9-]{0,31})';
 
 const ROUTES = [
   ['GET', /^\/health$/, (req, res) => sendJson(res, 200, describeRuntime())],
@@ -948,6 +1262,10 @@ const ROUTES = [
   ['POST', /^\/warm$/, handleWarm],
   ['GET', /^\/voices$/, handleListVoices],
   ['POST', /^\/setup$/, handleSetup],
+  ['GET', /^\/keys$/, handleListKeys],
+  ['POST', /^\/keys$/, handleAddKey],
+  ['GET', new RegExp(`^/keys/${PROVIDER_ID}/models$`), handleKeyModels],
+  ['DELETE', new RegExp(`^/keys/${PROVIDER_ID}$`), handleRemoveKey],
   ['POST', /^\/chat$/, handleChat],
   ['POST', /^\/tts\/plan$/, handleTtsPlan],
   ['POST', /^\/tts$/, handleTts],
@@ -1051,7 +1369,7 @@ function start(options = {}) {
       const settings = readSettings();
       await history.load().catch(() => {});
 
-      const where = (provider) => (provider === 'z-ai' ? 'cloud' : 'local');
+      const where = (provider) => (provider === 'z-ai' || provider === 'cloud' ? 'cloud' : 'local');
       console.log('');
       console.log('  ✦ Buddy local server');
       console.log(`    http://127.0.0.1:${port}`);
@@ -1065,6 +1383,11 @@ function start(options = {}) {
             : '') +
           (settings.chat.provider === 'builtin'
             ? ` · ${modelStore.get(modelId).label} · ${modelState.ready ? 'model ready' : 'model NOT downloaded yet'}`
+            : '') +
+          (settings.chat.provider === 'cloud'
+            ? ` · ${settings.chat.cloudProvider || 'no provider'} · ${settings.chat.cloudModel || 'no model'} · ${
+                keyStore.has(configDir(), settings.chat.cloudProvider) ? 'key saved' : 'NO KEY SAVED'
+              }`
             : '')
       );
       console.log(

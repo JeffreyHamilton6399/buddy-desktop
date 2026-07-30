@@ -21,7 +21,17 @@
  */
 'use strict';
 
-/** Everything Buddy is allowed to do, and how to check the argument. */
+const path = require('path');
+
+const files = require('./files.js');
+
+/**
+ * Everything Buddy is allowed to do, and how to check the argument.
+ *
+ * `fields: 2` means the marker carries a path and a body separated by the first
+ * `|`, rather than a single value — writing a file needs both, and the body can
+ * contain anything including newlines and further pipes.
+ */
 const ACTIONS = {
   open_url: {
     summary: 'open a web page',
@@ -81,6 +91,63 @@ const ACTIONS = {
     },
     describe: (value) => `open Buddy's ${value} folder`,
     describeDone: (value) => `Opened Buddy's ${value} folder`,
+  },
+
+  // ── files, and only inside folders the user has named ───────────────────
+
+  read_file: {
+    summary: 'read a file',
+    needsFiles: true,
+    validate(argument, context) {
+      const found = files.resolveWithin(context.fileRoots, argument);
+      if (!found.ok) return { ok: false, error: found.error };
+      return { ok: true, value: found.path };
+    },
+    describe: (value) => `read ${path.basename(value)}`,
+    describeDone: (value) => `Read ${path.basename(value)}`,
+  },
+
+  list_folder: {
+    summary: 'list a folder',
+    needsFiles: true,
+    validate(argument, context) {
+      // "." and "" both mean "the folder you shared with me", which is what a
+      // model reaches for when asked what files there are.
+      const wanted = String(argument || '').trim();
+      const found = files.resolveWithin(context.fileRoots, wanted === '.' || !wanted ? './' : wanted);
+      if (!found.ok) return { ok: false, error: found.error };
+      return { ok: true, value: found.path };
+    },
+    describe: (value) => `list ${path.basename(value) || value}`,
+    describeDone: (value) => `Listed ${path.basename(value) || value}`,
+  },
+
+  write_file: {
+    summary: 'write a file',
+    needsFiles: true,
+    fields: 2,
+    validate(argument, context) {
+      const found = files.resolveWithin(context.fileRoots, argument.path);
+      if (!found.ok) return { ok: false, error: found.error };
+      if (!argument.content) return { ok: false, error: 'there was no text to write' };
+      return { ok: true, value: found.path, content: argument.content };
+    },
+    describe: (value) => `write to ${path.basename(value)}`,
+    describeDone: (value) => `Wrote ${path.basename(value)}`,
+  },
+
+  append_file: {
+    summary: 'add to a file',
+    needsFiles: true,
+    fields: 2,
+    validate(argument, context) {
+      const found = files.resolveWithin(context.fileRoots, argument.path);
+      if (!found.ok) return { ok: false, error: found.error };
+      if (!argument.content) return { ok: false, error: 'there was nothing to add' };
+      return { ok: true, value: found.path, content: argument.content, append: true };
+    },
+    describe: (value) => `add to ${path.basename(value)}`,
+    describeDone: (value) => `Added to ${path.basename(value)}`,
   },
 };
 
@@ -152,8 +219,59 @@ const ACTION_INSTRUCTIONS =
 const REQUEST_PATTERN =
   /\b(open|opens|opening|launch|start up|go to|goto|visit|browse|pull up|bring up|take me to|show me|search|searching|look up|lookup|google|duckduckgo|find me|download)\b/i;
 
-function looksLikeRequest(text) {
-  return REQUEST_PATTERN.test(String(text || ''));
+/** The same idea for files: verbs about reading and writing them. */
+const FILE_REQUEST_PATTERN =
+  /\b(file|files|folder|directory|note|notes|write|writes|writing|save|saves|saving|edit|edits|editing|append|add to|create|read|list|rename|txt|markdown|\.md)\b/i;
+
+function looksLikeRequest(text, { allowFiles = false } = {}) {
+  const source = String(text || '');
+  if (REQUEST_PATTERN.test(source)) return true;
+  return allowFiles && FILE_REQUEST_PATTERN.test(source);
+}
+
+/**
+ * The instruction block for a given set of permissions.
+ *
+ * The file half is only ever added when files are switched on and a folder has
+ * actually been shared. Describing an ability the model does not have is worse
+ * than saying nothing: it will confidently claim to have saved something.
+ *
+ * The folders are named because a model that does not know where it is allowed
+ * to write invents a path, gets refused, and apologises — which reads to the
+ * user as the feature being broken.
+ */
+function instructionsFor({ allowFiles = false, fileRoots = [] } = {}) {
+  if (!allowFiles || !fileRoots.length) return ACTION_INSTRUCTIONS;
+
+  const folders = fileRoots.map((root) => `  ${root}`).join('\n');
+  return (
+    `${ACTION_INSTRUCTIONS}\n\n` +
+    'You can also read and write files, but ONLY inside these folders:\n' +
+    `${folders}\n\n` +
+    'The markers are:\n' +
+    '  [[read_file: name.txt]]\n' +
+    '  [[list_folder: .]]\n' +
+    '  [[write_file: name.txt | the entire new contents of the file]]\n' +
+    '  [[append_file: name.txt | the text to add on the end]]\n' +
+    '\n' +
+    'Examples of exactly what to write:\n' +
+    '\n' +
+    'User: make a note that the bins go out on Tuesday\n' +
+    'You: Saved that to bins.txt.\n' +
+    '[[write_file: bins.txt | The bins go out on Tuesday.]]\n' +
+    '\n' +
+    'User: what files do I have?\n' +
+    'You: Here is what is in there.\n' +
+    '[[list_folder: .]]\n' +
+    '\n' +
+    'User: add milk to my shopping list\n' +
+    'You: Added it.\n' +
+    '[[append_file: shopping.txt | milk]]\n' +
+    '\n' +
+    'write_file replaces the whole file, so give the complete new contents, not ' +
+    'just the change. The previous version is kept as a .bak file automatically. ' +
+    'Use a plain file name — you cannot write anywhere outside the folders above.'
+  );
 }
 
 /**
@@ -191,11 +309,18 @@ function stripSpeakerLabel(text) {
   return text.replace(/^\s*(?:you|assistant|buddy)\s*:\s*/i, '');
 }
 
-function extractAction(reply) {
+function extractAction(reply, context = {}) {
+  const settings = { fileRoots: [], allowFiles: false, ...context };
   const text = stripSpeakerLabel(String(reply || ''));
   // Accept `[[name: arg]]`, `[[name | arg]]` and `[[action: name | arg]]`, since
   // which of those a model produces is largely luck.
-  const pattern = /\[\[\s*(?:action\s*[:|]\s*)?([a-z_]+)\s*[:|]\s*([\s\S]*?)\s*\]\]/i;
+  /**
+   * Note there is no `\s*` before the closing brackets. There used to be, and
+   * it silently ate the trailing newline off every file written — so a file
+   * that should have ended in a newline never did. Each branch below trims what
+   * it actually wants instead.
+   */
+  const pattern = /\[\[\s*(?:action\s*[:|]\s*)?([a-z_]+)\s*[:|]\s*([\s\S]*?)\]\]/i;
   const match = text.match(pattern);
   if (!match) return { reply: text.trim(), action: null, refused: null };
 
@@ -203,16 +328,45 @@ function extractAction(reply) {
   const cleaned = text.replace(pattern, '').trim();
   const raw = match[1].toLowerCase();
   const name = ACTIONS[raw] ? raw : ALIASES[raw] || raw;
-  // Small models like to append a second field nobody asked for
-  // (`[[search: tide times | tide.org]]`); the first one is the argument.
-  const argument = (match[2] || '').split('|')[0].trim();
 
   const definition = ACTIONS[name];
   if (!definition) {
     return { reply: cleaned, action: null, refused: `Buddy tried to run "${name}", which is not something it can do.` };
   }
+  // A marker for a switched-off ability is refused rather than performed. The
+  // instructions never mention these unless they are on, so reaching one means
+  // the model invented it.
+  if (definition.needsFiles && !settings.allowFiles) {
+    return {
+      reply: cleaned,
+      action: null,
+      refused: `Buddy tried to ${definition.summary}, but it is not allowed to touch files.`,
+    };
+  }
 
-  const checked = definition.validate(argument);
+  const body = match[2] || '';
+  let argument;
+  if (definition.fields === 2) {
+    // Split on the first pipe only: everything after it is the file's contents,
+    // which may itself contain pipes and newlines.
+    const at = body.indexOf('|');
+    // The separator is written as `| text` or `|` then a newline. Strip exactly
+    // that much and no more, so indentation on the first line of a file — which
+    // matters in anything code-shaped — survives.
+    argument =
+      at === -1
+        ? { path: body.trim(), content: '' }
+        : {
+            path: body.slice(0, at).trim(),
+            content: body.slice(at + 1).replace(/^(?:[ \t]*\r?\n|[ \t])/, ''),
+          };
+  } else {
+    // Small models like to append a second field nobody asked for
+    // (`[[search: tide times | tide.org]]`); the first one is the argument.
+    argument = body.split('|')[0].trim();
+  }
+
+  const checked = definition.validate(argument, settings);
   if (!checked.ok) {
     return { reply: cleaned, action: null, refused: `Buddy tried to ${definition.summary}, but ${checked.error}.` };
   }
@@ -222,6 +376,8 @@ function extractAction(reply) {
     action: {
       name,
       value: checked.value,
+      ...(checked.content !== undefined ? { content: checked.content } : {}),
+      ...(checked.append ? { append: true } : {}),
       // "about to" and "just did" read very differently in a transcript.
       description: definition.describe(checked.value),
       done: definition.describeDone(checked.value),
@@ -230,4 +386,11 @@ function extractAction(reply) {
   };
 }
 
-module.exports = { ACTIONS, ACTION_NAMES, ACTION_INSTRUCTIONS, extractAction, looksLikeRequest };
+module.exports = {
+  ACTIONS,
+  ACTION_NAMES,
+  ACTION_INSTRUCTIONS,
+  instructionsFor,
+  extractAction,
+  looksLikeRequest,
+};

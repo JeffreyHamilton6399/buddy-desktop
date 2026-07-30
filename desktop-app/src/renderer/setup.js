@@ -149,7 +149,7 @@ export function initSetup() {
     stopPolling();
     ready.hidden = true;
     form.hidden = false;
-    title.textContent = 'Use a cloud API';
+    title.textContent = 'Use an API key';
     lede.textContent = 'Only if you want to. The built-in model needs none of this.';
     $('setup-key').focus();
   });
@@ -163,35 +163,54 @@ export function initSetup() {
     beginDownload();
   });
 
+  /**
+   * One field, because the key says who issued it.
+   *
+   * Only chat moves to the cloud: the voice and the ears are a free download
+   * that then never needs the network, so sending audio to a paid API by
+   * default would be a worse deal on both counts.
+   */
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     errorBox.hidden = true;
 
-    const baseUrl = $('setup-baseurl').value.trim();
     const apiKey = $('setup-key').value.trim();
-    if (!baseUrl || !apiKey) {
-      errorBox.textContent = 'Both the base URL and the API key are required.';
+    if (!apiKey) {
+      errorBox.textContent = 'Paste an API key first.';
       errorBox.hidden = false;
       return;
     }
+    const baseUrl = $('setup-baseurl').value.trim();
 
     saveButton.disabled = true;
-    saveButton.textContent = 'Saving…';
+    saveButton.textContent = 'Checking…';
     try {
-      await api('/setup', { baseUrl, apiKey });
+      // A base URL typed here only ever means "somewhere Buddy doesn't know".
+      const saved = await api('/keys', { apiKey, ...(baseUrl ? { baseUrl, provider: 'custom' } : {}) });
       await api('/settings', {
-        chat: { provider: 'z-ai' },
-        tts: { provider: 'z-ai', voice: 'tongtong' },
-        asr: { provider: 'z-ai' },
+        chat: { provider: 'cloud', cloudProvider: saved.provider.id, cloudModel: saved.model },
+        tts: { provider: 'kokoro' },
+        asr: { provider: 'local' },
+      });
+      // The voice and the ears still want fetching, in the background.
+      api('/speech', { what: 'both' }).catch(() => {
+        /* the settings panel will offer it again */
       });
       finished = true;
       stopPolling();
       window.buddy.setupComplete();
     } catch (error) {
+      // An unrecognised key is a follow-up question, not a dead end. There is
+      // no provider picker on this screen, so the address is the way through;
+      // Settings ▸ Brain asks the better question once Buddy is running.
+      if (error.payload && (error.payload.needsProvider || error.payload.needsBaseUrl)) {
+        $('setup-baseurl-row').hidden = false;
+        $('setup-baseurl').focus();
+      }
       errorBox.textContent = error.message;
       errorBox.hidden = false;
       saveButton.disabled = false;
-      saveButton.textContent = 'Use this cloud API';
+      saveButton.textContent = 'Use this API key';
     }
   });
 

@@ -18,11 +18,15 @@
         <div class="orb-glow" aria-hidden="true"></div>
         <div class="orb-ring" id="orb-ring" aria-hidden="true"></div>
         <div class="orb-ripple" id="orb-ripple" aria-hidden="true"></div>
+        <!--
+          The orb itself swells with the voice — yours while it listens, its own
+          while it answers — driven by --level on the stage. It used to be a
+          separate green disc behind the orb, which read as a meter stuck to the
+          side of it rather than as the thing reacting.
+        -->
         <button class="orb" id="orb" type="button" aria-label="Ask Buddy">
           <span class="orb-core"></span>
           <span class="orb-sheen"></span>
-          <!-- Grows and shrinks with how loudly you are speaking. -->
-          <span class="orb-level" id="orb-level" aria-hidden="true"></span>
         </button>
         <span class="orb-dot" id="orb-dot" aria-hidden="true"></span>
         <div class="orb-tooltip" id="orb-tooltip">Ask Buddy</div>
@@ -54,20 +58,6 @@
             <button class="icon-btn" id="new-chat" type="button" title="New chat" aria-label="Start a new chat">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-            <button
-              class="icon-btn"
-              id="speaker"
-              type="button"
-              aria-pressed="true"
-              title="Voice replies: on"
-              aria-label="Toggle voice replies"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 10v4h3l4 3V7L7 10H4z" />
-                <path class="wave wave-1" d="M15.5 9.2a3.6 3.6 0 0 1 0 5.6" />
-                <path class="wave wave-2" d="M17.9 6.8a7 7 0 0 1 0 10.4" />
               </svg>
             </button>
             <button class="icon-btn" id="close-panel" type="button" title="Close" aria-label="Close Buddy">
@@ -130,6 +120,12 @@
                   </svg>
                   <span>Hearing</span>
                 </button>
+                <button class="rail-tab" type="button" role="tab" data-pane="doing" aria-selected="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+                  </svg>
+                  <span>Doing</span>
+                </button>
                 <button class="rail-tab" type="button" role="tab" data-pane="chats" aria-selected="false">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M20 15a3 3 0 0 1-3 3H8l-4 3V6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3z" />
@@ -148,25 +144,105 @@
               <div class="panes" id="settings-panes">
                 <!-- ── brain: which model answers ─────────────────── -->
                 <section class="pane is-on" data-pane="brain" role="tabpanel">
-                  <h2>Which model answers</h2>
+                  <h2>Where Buddy thinks</h2>
+                  <!--
+                    This pair is the way back as much as the way out. Switching
+                    to the cloud used to be a one-way door: the built-in model
+                    still showed "Answering now" afterwards, so there was no
+                    button anywhere that meant "go back to running locally".
+                  -->
+                  <div class="runs" id="runs">
+                    <button class="runs-choice" id="run-local" type="button">
+                      <strong>On this machine</strong>
+                      <small>No key, no account, nothing leaves the device.</small>
+                    </button>
+                    <button class="runs-choice" id="run-cloud" type="button">
+                      <strong>In the cloud</strong>
+                      <small>Bigger models, using an API key you provide.</small>
+                    </button>
+                  </div>
+                  <p class="pane-lede" id="runs-note"></p>
+
+                  <h3>Models on this machine</h3>
                   <p class="pane-lede">
                     Buddy downloads these itself and runs them on this machine. Bigger is smarter and slower.
                   </p>
+                  <input
+                    id="model-search"
+                    class="model-search"
+                    type="search"
+                    placeholder="Search — try “small”, “code”, “qwen”…"
+                    spellcheck="false"
+                    autocomplete="off"
+                    aria-label="Search models"
+                  />
                   <div class="model-list" id="model-list"></div>
 
                   <h3>Bring your own from Ollama</h3>
                   <p class="pane-lede" id="ollama-lede">Looking for Ollama on this machine…</p>
                   <div class="model-list" id="ollama-list"></div>
 
-                  <h3>Or use a cloud API</h3>
-                  <div class="row" id="cloud-row">
-                    <button class="btn" id="use-cloud" type="button">Use the z-ai cloud instead</button>
+                  <!--
+                    One field. The key itself says who issued it, so asking for
+                    the provider and the endpoint as well was two questions
+                    nobody should have to answer.
+                  -->
+                  <h3>Cloud providers</h3>
+                  <p class="pane-lede">
+                    Paste a key from Anthropic, OpenAI, Groq, OpenRouter, Google, xAI or z.ai and Buddy will
+                    recognise it. Anything else works too, if you know its address.
+                  </p>
+                  <div class="key-add">
+                    <input
+                      id="key-input"
+                      type="password"
+                      placeholder="Paste an API key…"
+                      spellcheck="false"
+                      autocomplete="off"
+                      aria-label="API key"
+                    />
+                    <button class="btn primary" id="key-save" type="button">Add key</button>
                   </div>
+                  <!--
+                    Only shown when the key's shape isn't one Buddy knows. The
+                    question is who issued it, not what their endpoint is —
+                    that is something the user knows and Buddy can look up.
+                  -->
+                  <div id="key-provider-row" hidden>
+                    <label for="key-provider">Who issued this key?</label>
+                    <select id="key-provider"></select>
+                  </div>
+                  <div id="key-baseurl-row" hidden>
+                    <label for="key-baseurl">Server address</label>
+                    <input
+                      id="key-baseurl"
+                      type="url"
+                      placeholder="https://your-server/v1"
+                      spellcheck="false"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <p class="row-note" id="key-note"></p>
+                  <div class="model-list" id="key-list"></div>
                 </section>
 
                 <!-- ── voice ──────────────────────────────────────── -->
                 <section class="pane" data-pane="voice" role="tabpanel">
                   <h2>How Buddy sounds</h2>
+
+                  <!-- Lived in the panel header as an unlabelled speaker icon,
+                       which is not where anyone would look for it. -->
+                  <label class="switch big">
+                    <input type="checkbox" id="speak-replies" />
+                    <span>
+                      <strong>Read replies out loud</strong>
+                      <small>
+                        Applies to what you type in the panel. Anything you ask by saying “Hey Buddy” is always
+                        answered out loud — that is the point of asking that way.
+                      </small>
+                    </span>
+                  </label>
+
                   <div class="asset" id="voice-asset" hidden>
                     <div class="asset-text">
                       <strong id="voice-asset-title">Buddy's own voice isn't downloaded yet</strong>
@@ -180,8 +256,15 @@
                   <select id="tts-provider">
                     <option value="kokoro">Buddy's own voice — neural, on this machine</option>
                     <option value="system">This computer's built-in voices</option>
-                    <option value="z-ai">The z-ai cloud (needs an API key)</option>
+                    <option value="cloud">A cloud voice, using an API key you've added</option>
                   </select>
+
+                  <!-- Which saved key does the speaking. Only providers that
+                       actually offer a voice appear here. -->
+                  <div id="tts-cloud-options" hidden>
+                    <label for="tts-cloud-provider">Provider</label>
+                    <select id="tts-cloud-provider"></select>
+                  </div>
 
                   <div id="kokoro-options">
                     <label for="tts-voice">Voice</label>
@@ -226,9 +309,14 @@
                   <select id="asr-provider">
                     <option value="local">Buddy's own ears — Whisper, on this machine</option>
                     <option value="whisper">A Whisper server I run myself</option>
-                    <option value="z-ai">The z-ai cloud (needs an API key)</option>
+                    <option value="cloud">A cloud service, using an API key you've added</option>
                     <option value="off">Off — Buddy cannot hear at all</option>
                   </select>
+
+                  <div id="asr-cloud-options" hidden>
+                    <label for="asr-cloud-provider">Provider</label>
+                    <select id="asr-cloud-provider"></select>
+                  </div>
 
                   <div id="local-whisper-options">
                     <label for="asr-local-model">Accuracy</label>
@@ -271,18 +359,44 @@
                     <div class="probe-step" data-step="match"><i></i><span>Matched “Hey Buddy”</span><em></em></div>
                   </div>
 
-                  <h3>Doing things on this computer</h3>
+                </section>
+
+                <!-- ── what Buddy is allowed to do ────────────────── -->
+                <section class="pane" data-pane="doing" role="tabpanel">
+                  <h2>What Buddy may do</h2>
+                  <p class="pane-lede">
+                    Everything here is off until you turn it on, and every action is written into the chat
+                    as it happens — nothing is done quietly.
+                  </p>
+
                   <label class="switch big">
                     <input type="checkbox" id="allow-actions" />
                     <span>
                       <strong>Let Buddy open things</strong>
                       <small>
                         Web pages, searches, and its own folders — nothing else, and only when you ask.
-                        Every action is written into the chat as it happens.
                       </small>
                     </span>
                   </label>
                   <p class="pane-lede" id="actions-note"></p>
+
+                  <h3>Files</h3>
+                  <label class="switch big">
+                    <input type="checkbox" id="allow-files" />
+                    <span>
+                      <strong>Let Buddy read and write files</strong>
+                      <small>
+                        Only inside the folders you add below. Nowhere else on the computer, ever — and the
+                        old version of anything it overwrites is kept alongside it as a .bak file.
+                      </small>
+                    </span>
+                  </label>
+
+                  <div class="model-list" id="file-roots"></div>
+                  <div class="row">
+                    <button class="btn" id="add-file-root" type="button">Add a folder…</button>
+                    <span class="row-note" id="files-note"></span>
+                  </div>
                 </section>
 
                 <!-- ── chats / privacy ────────────────────────────── -->
@@ -311,7 +425,8 @@
           </aside>
         </div>
 
-        <div class="equalizer" id="equalizer" hidden aria-hidden="true">
+        <!-- Also the stop button: click it (or press Escape) to cut Buddy off. -->
+        <div class="equalizer" id="equalizer" hidden role="button" tabindex="0" title="Stop speaking (Esc)" aria-label="Stop speaking">
           <i></i><i></i><i></i><i></i><i></i>
         </div>
 
@@ -367,25 +482,28 @@
         <form id="setup-form" hidden>
           <!-- ── cloud ─────────────────────────────────────────────── -->
           <div id="pane-cloud">
-            <label for="setup-baseurl">API base URL</label>
-            <input
-              id="setup-baseurl"
-              type="url"
-              value="https://api.z.ai/api/paas/v4"
-              spellcheck="false"
-              autocomplete="off"
-            />
+            <label for="setup-key">API key</label>
+            <input id="setup-key" type="password" placeholder="Paste an API key…" spellcheck="false" autocomplete="off" />
             <p class="setup-hint">
-              Must be the endpoint that serves <code>/chat/completions</code>, <code>/audio/tts</code> and
-              <code>/audio/asr</code>.
+              A key from Anthropic, OpenAI, Groq, OpenRouter, Google, xAI or z.ai — I'll work out which it is.
+              I'll still speak and listen on this machine.
             </p>
 
-            <label for="setup-key">API key</label>
-            <input id="setup-key" type="password" placeholder="Your z-ai API key" spellcheck="false" autocomplete="off" />
+            <!-- Only shown when the key belongs to nobody I recognise. -->
+            <div id="setup-baseurl-row" hidden>
+              <label for="setup-baseurl">Server address</label>
+              <input
+                id="setup-baseurl"
+                type="url"
+                placeholder="https://your-server/v1"
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </div>
           </div>
 
           <p class="setup-error" id="setup-error" role="alert" hidden></p>
-          <button class="setup-save" id="setup-save" type="submit">Use this cloud API</button>
+          <button class="setup-save" id="setup-save" type="submit">Use this API key</button>
           <button class="link-btn" id="hide-advanced" type="button">Back — just use the built-in model</button>
         </form>
 

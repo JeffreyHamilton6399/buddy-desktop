@@ -15,6 +15,55 @@
 import { api, runtime } from './core.js';
 
 /**
+ * A tap on whatever is being played, so the orb can move with the voice rather
+ * than to a fixed animation. One context and one analyser for the whole
+ * renderer: each chunk is a fresh <audio> element, but they all feed this.
+ *
+ * Everything here is best effort. If the browser refuses the graph — a
+ * suspended context, an element it will not let us tap — playback falls back to
+ * the plain element and the orb simply keeps its idle animation.
+ */
+let audioContext = null;
+let analyser = null;
+let scratch = null;
+
+function tapInto(element) {
+  try {
+    if (!audioContext) {
+      audioContext = new AudioContext();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      // Enough smoothing that the orb swells with speech instead of buzzing.
+      analyser.smoothingTimeConstant = 0.7;
+      scratch = new Uint8Array(analyser.fftSize);
+      analyser.connect(audioContext.destination);
+    }
+    // Routing through WebAudio means a suspended context is silence, not just
+    // a missing meter — so this has to succeed before the element is played.
+    if (audioContext.state === 'suspended') audioContext.resume();
+    const source = audioContext.createMediaElementSource(element);
+    source.connect(analyser);
+    return () => source.disconnect();
+  } catch {
+    return null;
+  }
+}
+
+/** How loud the voice is this instant, 0..1. */
+function outputLevel() {
+  if (!analyser) return 0;
+  analyser.getByteTimeDomainData(scratch);
+  let sum = 0;
+  for (let i = 0; i < scratch.length; i++) {
+    const deviation = (scratch[i] - 128) / 128;
+    sum += deviation * deviation;
+  }
+  // Speech sits well below full scale, so the raw figure is scaled up to use
+  // the whole range rather than nudging the orb by a couple of pixels.
+  return Math.min(1, Math.sqrt(sum / scratch.length) * 3.4);
+}
+
+/**
  * @param {{ onStart?: () => void, onEnd?: () => void, onError?: (error: Error) => void }} hooks
  */
 export function createSpeaker({ onStart, onEnd, onError } = {}) {
@@ -70,9 +119,11 @@ export function createSpeaker({ onStart, onEnd, onError } = {}) {
       }
       const element = new Audio(url);
       audio = element;
+      const untap = tapInto(element);
 
       const done = () => {
         URL.revokeObjectURL(url);
+        if (untap) untap();
         if (audio === element) audio = null;
         resolve();
       };
@@ -103,6 +154,15 @@ export function createSpeaker({ onStart, onEnd, onError } = {}) {
   return {
     get speaking() {
       return speaking;
+    },
+
+    /**
+     * How loud Buddy is talking right now, 0..1, for anything that wants to
+     * move with the voice. Zero when silent, and zero on the OS voices, which
+     * speechSynthesis gives no way to measure.
+     */
+    get level() {
+      return speaking ? outputLevel() : 0;
     },
 
     /** Say a reply. Resolves once the last chunk has finished playing. */
@@ -156,31 +216,6 @@ export function createSpeaker({ onStart, onEnd, onError } = {}) {
       } catch (error) {
         if (onError) onError(error);
         else console.warn('[buddy] voice reply failed:', error.message);
-      } finally {
-        if (mine === generation) finish();
-      }
-    },
-
-    /**
-     * Play a wav the server already has cached, in one go. Used for the wake-word
-     * greeting, where a chunking round trip would add latency to a fixed line.
-     */
-    async say(text) {
-      this.stop();
-      const mine = generation;
-      try {
-        const result = await synthesize(text);
-        if (mine !== generation) {
-          if (result.url) URL.revokeObjectURL(result.url);
-          return;
-        }
-        speaking = true;
-        if (onStart) onStart();
-        if (result.system) await speakWithSystemVoice(result.system.text, result.system.voice, mine);
-        else if (result.url) await play(result.url, mine);
-      } catch (error) {
-        if (onError) onError(error);
-        else console.warn('[buddy] could not speak:', error.message);
       } finally {
         if (mine === generation) finish();
       }

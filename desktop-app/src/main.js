@@ -577,6 +577,24 @@ function registerIpc() {
   ipcMain.on('buddy:open-config-folder', () => shell.openPath(app.getPath('userData')));
 
   /**
+   * Share a folder with Buddy.
+   *
+   * Deliberately a native picker rather than a text box: the user chooses a
+   * real folder that really exists, and there is no way to fat-finger a path
+   * that turns out to be the whole of C:.
+   */
+  ipcMain.handle('buddy:pick-folder', async () => {
+    const { dialog } = require('electron');
+    const parent = panelWindow && !panelWindow.isDestroyed() ? panelWindow : undefined;
+    const result = await dialog.showOpenDialog(parent, {
+      title: 'Choose a folder Buddy may read and write in',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return result.filePaths[0];
+  });
+
+  /**
    * Carry out an action the model asked for.
    *
    * The server already validated this, and it is validated again here. That is
@@ -588,6 +606,45 @@ function registerIpc() {
   ipcMain.handle('buddy:run-action', async (_event, action) => {
     const name = action && typeof action.name === 'string' ? action.name : '';
     const value = action && typeof action.value === 'string' ? action.value : '';
+
+    /**
+     * File actions are re-checked here from scratch — the permission, the
+     * folder list, and the path — even though the server already did all three.
+     * This handler is reachable by anything that can put a message on the wire,
+     * so it cannot take the renderer's word for where a file may be written.
+     */
+    if (name === 'read_file' || name === 'write_file' || name === 'append_file' || name === 'list_folder') {
+      const files = require('./server/files.js');
+      const { readSettings } = require('./server/server.js');
+      const settings = readSettings();
+
+      if (!settings.allowFiles) return { ok: false, error: 'Buddy is not allowed to touch files.' };
+      const found = files.resolveWithin(settings.fileRoots, value);
+      if (!found.ok) return { ok: false, error: found.error };
+
+      try {
+        if (name === 'read_file') {
+          const result = await files.readTextFile(found.path);
+          return result.ok ? { ok: true, detail: result.text } : { ok: false, error: result.error };
+        }
+        if (name === 'list_folder') {
+          const result = await files.listFolder(found.path);
+          if (!result.ok) return { ok: false, error: result.error };
+          const listing = result.entries.length ? result.entries.join('\n') : '(empty)';
+          return { ok: true, detail: result.truncated ? `${listing}\n…and more` : listing };
+        }
+
+        const content = typeof action.content === 'string' ? action.content : '';
+        const result = await files.writeTextFile(found.path, content, { append: action.append === true });
+        if (!result.ok) return { ok: false, error: result.error };
+        return {
+          ok: true,
+          detail: result.backedUp ? `The previous version was kept as ${path.basename(result.backedUp)}.` : '',
+        };
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    }
 
     if (name === 'open_url' || name === 'search_web') {
       let url;

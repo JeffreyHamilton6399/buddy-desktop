@@ -12,7 +12,7 @@ then works forever, offline, on your own machine.
 ```
 
 Under the hood, three models run inside the app and none of them needs a network once downloaded:
-[llama.cpp](https://github.com/ggerganov/llama.cpp) runs **Llama 3.2 1B** for thinking,
+[llama.cpp](https://github.com/ggerganov/llama.cpp) runs **Qwen 3 4B** for thinking,
 **Kokoro-82M** speaks the replies in a neural voice, and **Whisper tiny.en** listens for its name and
 for what you say. Your conversations are **saved on your device** as plain JSON you can browse from
 the app and delete whenever you like.
@@ -41,12 +41,12 @@ or type leaves it:
 
 | Job | Default (no setup) | Optional alternatives | Leaves your device? |
 | --- | --- | --- | --- |
-| **Thinking** | Llama 3.2 1B, in-process via llama.cpp | 3 bigger models · Ollama · a cloud API | **no** |
+| **Thinking** | Qwen 3 4B, in-process via llama.cpp | 12 other models · Ollama · any cloud API key | **no** |
 | **Talking** | Kokoro-82M, in-process via onnxruntime | your OS's voices · a cloud API | **no** |
 | **Hearing** | Whisper tiny.en, in-process | your own Whisper server · a cloud API · off | **no** |
 | **Your chat history** | plain JSON on your disk | — | **never** |
 
-The one exception is the **downloads on first launch**, all from HuggingFace: ~770 MB for the model,
+The one exception is the **downloads on first launch**, all from HuggingFace: ~2.3 GB for the model,
 then ~156 MB for the voice and ~39 MB for the ears. Only the model is waited for — Buddy opens as
 soon as it can think, and the other two arrive in the background while you type. After that Buddy
 runs with the network unplugged, and you can verify that by unplugging it. Nothing is phoned home,
@@ -108,7 +108,7 @@ than failing quietly.
 1. Download the installer for your OS from the
    [latest release](https://github.com/JeffreyHamilton6399/buddy-desktop/releases/latest).
 2. Run it (see [First launch](#first-launch-unsigned-builds) — the builds are unsigned).
-3. On first launch Buddy downloads its model (~770 MB, once) and shows a progress bar. Nothing to
+3. On first launch Buddy downloads its model (~2.3 GB, once) and shows a progress bar. Nothing to
    choose, no key to paste. If the download is interrupted it resumes.
 4. The orb appears in the top-right corner. Drag it wherever you like; it remembers.
 
@@ -199,7 +199,8 @@ settings panel says so next to the switch.
 
 ### A bigger built-in model
 
-**Settings → Brain** lists four, from the 770 MB default up to Qwen 2.5 7B. Each shows its download
+**Settings → Brain** lists thirteen, from a 0.6 GB tiny model up to GPT-OSS 20B, with a search box
+and a note when one needs more memory than the machine has. Each shows its download
 size and roughly how much memory it wants, because that is the part that decides whether a model is
 pleasant on a given laptop. Buddy verifies each download against a known SHA-256 and will not load a
 file that fails.
@@ -240,7 +241,7 @@ providers, so there is no codec to agree on.
 
 Inside the data folder:
 
-- `models/*.gguf` — the brain, ~770 MB for the default. **Settings → Brain** has a Delete button for
+- `models/*.gguf` — the brain, ~2.3 GB for the default. **Settings → Brain** has a Delete button for
   any model that is not currently answering; you cannot delete the last one out from under yourself.
 - `models/hf/` — the voice (~156 MB) and the ears (~39 MB).
 
@@ -404,7 +405,7 @@ a packaged build:
 | Linux | `~/.config/buddy/` |
 
 - `buddy-settings.json` — which provider serves each capability, and whether history is saved.
-- `models/*.gguf` — the built-in language models (~770 MB each). Delete to reclaim the space.
+- `models/*.gguf` — the built-in language models (0.6–11 GB each). Delete to reclaim the space.
 - `models/hf/` — the voice (~156 MB) and the ears (~39 MB), as ONNX weights.
 - `chats/<id>.json` — one file per conversation. Yours to read, back up or delete.
 - `.z-ai-config` — your `baseUrl` and `apiKey`, written with `0600` where the filesystem supports it.

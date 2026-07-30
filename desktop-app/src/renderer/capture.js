@@ -232,6 +232,15 @@ export function createVoiceDetector({
   let speaking = false;
   let startedAt = 0;
   let calibrated = false;
+  let lastPushAt = 0;
+
+  /**
+   * A gap this long means frames stopped arriving — the panel opened, or the
+   * detector was parked while Buddy spoke. Whatever it believed about someone
+   * mid-sentence is stale by the time they resume, so treat the next frame as
+   * a fresh start rather than the continuation of a very long utterance.
+   */
+  const CONTINUITY_GAP_MS = 700;
 
   function threshold() {
     return Math.max(noiseFloor * FLOOR_FACTOR, noiseFloor + FLOOR_MARGIN, MIN_THRESHOLD);
@@ -258,6 +267,14 @@ export function createVoiceDetector({
     get noiseFloor() {
       return noiseFloor;
     },
+    /**
+     * How loud a frame has to be to count as speech, in the same units as rms.
+     * Exposed so the orb can listen for someone talking over Buddy against a
+     * deliberately higher bar than this one, without measuring the room twice.
+     */
+    get trigger() {
+      return threshold();
+    },
     /** How loud the room is right now, as a 0..1 fraction of the trigger point. */
     level(rms) {
       return Math.min(1, rms / Math.max(threshold(), 0.0001));
@@ -271,6 +288,7 @@ export function createVoiceDetector({
       quietSince = 0;
       speaking = false;
       calibrated = false;
+      lastPushAt = 0;
     },
 
     /**
@@ -294,6 +312,22 @@ export function createVoiceDetector({
         settleEndsAt = now + SETTLE_MS;
         calibrationEndsAt = settleEndsAt + calibrationMs;
       }
+
+      /**
+       * Frames stopped for a while and have now resumed. Without this, the
+       * stale `speaking` flag survives the gap and the very next frame trips
+       * the maximum-clip-length branch below — which does not just end a clip
+       * that was never recording, it raises the noise floor to whatever the
+       * room happens to be doing and starts a two-second recalibration. That
+       * is the "Hey Buddy stopped working after I opened settings" bug: come
+       * back from the panel and the wake word is deaf, then over-threshold.
+       */
+      if (lastPushAt && now - lastPushAt > CONTINUITY_GAP_MS) {
+        loudSince = 0;
+        quietSince = 0;
+        speaking = false;
+      }
+      lastPushAt = now;
 
       // Let the stream settle before believing anything it says.
       if (now < settleEndsAt) return false;
