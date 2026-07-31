@@ -30,6 +30,43 @@ function withTimeout(ms) {
   return { signal: controller.signal, done: () => clearTimeout(timer) };
 }
 
+// ── pictures ──────────────────────────────────────────────────────────────
+
+/**
+ * A message carries `images` as `{ mime, data }` with the data already base64
+ * and stripped of any `data:` prefix. Each provider wants that in its own shape,
+ * so the two builders below are the only places that know the difference.
+ *
+ * A message with no images is left as a plain string rather than being wrapped
+ * in a one-element content array. Both APIs accept either, but the string is
+ * what every other request in this file sends, and keeping it means adding
+ * pictures cannot change the behaviour of a conversation that has none.
+ */
+const hasImages = (message) => Array.isArray(message.images) && message.images.length > 0;
+
+function openAiContent(message) {
+  if (!hasImages(message)) return String(message.content || '');
+  return [
+    ...(message.content ? [{ type: 'text', text: String(message.content) }] : []),
+    ...message.images.map((image) => ({
+      type: 'image_url',
+      image_url: { url: `data:${image.mime};base64,${image.data}` },
+    })),
+  ];
+}
+
+/** Anthropic reads images better when they come before the question about them. */
+function anthropicContent(message) {
+  if (!hasImages(message)) return String(message.content || '');
+  return [
+    ...message.images.map((image) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: image.mime, data: image.data },
+    })),
+    ...(message.content ? [{ type: 'text', text: String(message.content) }] : []),
+  ];
+}
+
 /** Turn a provider's error body into one line worth showing someone. */
 function readError(status, body) {
   let detail = '';
@@ -79,7 +116,7 @@ async function openAiChat({ baseUrl, apiKey, model, messages, maxTokens }) {
     headers: keys.authHeaders('openai', apiKey),
     body: {
       model,
-      messages,
+      messages: messages.map((message) => ({ role: message.role, content: openAiContent(message) })),
       ...(Number.isFinite(maxTokens) && maxTokens > 0 ? { max_tokens: maxTokens } : {}),
     },
   });
@@ -108,7 +145,7 @@ async function anthropicChat({ baseUrl, apiKey, model, messages }) {
 
   const turns = messages
     .filter((message) => message.role === 'user' || message.role === 'assistant')
-    .map((message) => ({ role: message.role, content: String(message.content) }));
+    .map((message) => ({ role: message.role, content: anthropicContent(message) }));
 
   if (!turns.length) throw new Error('There was no message to send.');
 

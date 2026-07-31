@@ -30,6 +30,12 @@ contextBridge.exposeInMainWorld('buddy', {
   /** Carry out an action the model asked for. Re-validated in the main process. */
   runAction: (action) => ipcRenderer.invoke('buddy:run-action', action),
 
+  /**
+   * A picture of the screen, for showing Buddy what you are looking at. Only
+   * ever called from a button the user pressed — the model cannot ask for it.
+   */
+  captureScreen: () => ipcRenderer.invoke('buddy:capture-screen'),
+
   startOrbDrag: () => ipcRenderer.send('buddy:orb-drag-start'),
   endOrbDrag: () => ipcRenderer.send('buddy:orb-drag-end'),
 

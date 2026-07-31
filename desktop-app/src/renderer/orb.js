@@ -10,36 +10,96 @@
  */
 'use strict';
 
-import { $, api, boot, refreshRuntime, voiceInputAvailable } from './core.js';
+import { $, api, boot, runtime, buddyName, wakePhrase, refreshRuntime, voiceInputAvailable } from './core.js';
 import { openMicrophone, createVoiceDetector, samplesToBase64 } from './capture.js';
 import { createSpeaker } from './speech.js';
+import { applyLookFromRuntime } from './theme.js';
 
 /**
- * What counts as being called. Whisper transcribes the same two words a dozen
- * ways depending on the microphone, so the list is mishearings as much as
- * phrasings — "hey buddha" and "hey body" are what a narrowband headset mic
- * routinely produces for "hey buddy".
- *
- * Bare "buddy" is included because that is what people actually say once they
- * are used to it. It costs the occasional false wake when the word comes up in
- * conversation, which is a far smaller annoyance than not being heard.
+ * The ways people actually address something out loud. Whichever one the user
+ * typed into settings, all of these count — nobody who set the phrase to
+ * "Hey Ada" wants to be ignored for saying "Okay Ada".
  */
-const WAKE_TARGETS = [
-  'hey buddy',
-  'hi buddy',
-  'hey body',
-  'a buddy',
-  'hey butty',
-  'hey buddie',
-  'hey bud',
-  'ok buddy',
-  'okay buddy',
-  'yo buddy',
-  'hey buddha',
-  'buddy',
-  'buddie',
-  'hey there buddy',
-];
+const GREETINGS = ['hey', 'hi', 'ok', 'okay', 'yo', 'hello', 'hey there'];
+
+/**
+ * Names Whisper reliably mangles, and what it produces instead.
+ *
+ * "hey buddha" and "hey body" are what a narrowband headset mic routinely gives
+ * back for "hey buddy", and Buddy has shipped with that name from the start, so
+ * the hand-tuned list it was built around is kept. A name we have never seen
+ * gets no entry here and leans on the fuzzy pass below instead, which is what
+ * catches most mishearings anyway.
+ *
+ * The split matters. `bare` mishearings are odd enough spellings that hearing
+ * one on its own means Buddy was being addressed. `prefixed` ones are ordinary
+ * English words — a bare "body" or "bud" would fire every time somebody
+ * mentioned one — so those only count with a greeting in front of them.
+ */
+const KNOWN_MISHEARINGS = {
+  buddy: { bare: ['buddie'], prefixed: ['body', 'butty', 'bud', 'buddha'] },
+};
+
+const mishearingsFor = (name) => KNOWN_MISHEARINGS[name] || { bare: [], prefixed: [] };
+
+const DEFAULT_WAKE_PHRASE = 'Hey Buddy';
+
+/**
+ * How a transcript and a wake phrase are both flattened before they are
+ * compared: lowercase, no punctuation, single spaces.
+ */
+function flatten(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** "Hey there Ada" → { greeting: 'hey there', name: 'ada' }. */
+export function splitWakePhrase(phrase) {
+  const words = flatten(phrase).split(' ').filter(Boolean);
+  if (words.length >= 3 && words[0] === 'hey' && words[1] === 'there') {
+    return { greeting: 'hey there', name: words.slice(2).join(' ') };
+  }
+  if (words.length >= 2 && GREETINGS.includes(words[0])) {
+    return { greeting: words[0], name: words.slice(1).join(' ') };
+  }
+  return { greeting: '', name: words.join(' ') };
+}
+
+/**
+ * Every phrase that counts as being called, for one configured wake phrase.
+ *
+ * Bare name is included — "buddy" on its own, no greeting — because that is what
+ * people say once they are used to it. It costs the occasional false wake when
+ * the word comes up in conversation, which is a far smaller annoyance than not
+ * being heard. Short names are the exception: a two- or three-letter name would
+ * fire on half of ordinary speech, so those only ever wake with a greeting in
+ * front of them.
+ *
+ * Which mishearings may stand alone is decided by the table above, for the same
+ * reason.
+ */
+export function wakeVariants(phrase) {
+  const { name } = splitWakePhrase(phrase);
+  const targets = new Set();
+
+  const whole = flatten(phrase);
+  if (whole) targets.add(whole);
+  if (!name) return [...targets];
+
+  for (const greeting of GREETINGS) targets.add(`${greeting} ${name}`);
+  if (name.length >= 4) targets.add(name);
+
+  const misheard = mishearingsFor(name);
+  for (const spelling of [...misheard.bare, ...misheard.prefixed]) {
+    for (const greeting of GREETINGS) targets.add(`${greeting} ${spelling}`);
+  }
+  for (const spelling of misheard.bare) targets.add(spelling);
+
+  return [...targets];
+}
 
 function levenshtein(a, b) {
   if (a === b) return 0;
@@ -58,27 +118,72 @@ function levenshtein(a, b) {
   return previous[b.length];
 }
 
-/** Fuzzy match so common mishearings of "hey buddy" still wake Buddy up. */
-export function isWakePhrase(transcript) {
-  const normalised = String(transcript || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Everything needed to recognise one wake phrase, worked out once.
+ *
+ * Building this per clip would mean regenerating a few dozen strings and
+ * compiling a regex on every burst of room noise, which on a machine already
+ * running a language model is not free.
+ */
+function buildMatcher(phrase) {
+  const targets = wakeVariants(phrase);
+  const { name } = splitWakePhrase(phrase);
+
+  // The window the fuzzy pass slides over the transcript has to be able to hold
+  // the longest thing it is looking for, which a longer phrase than "hey buddy"
+  // would otherwise fall straight out of.
+  const longest = targets.reduce((most, target) => Math.max(most, target.length), 0);
+  const mostWords = targets.reduce((most, target) => Math.max(most, target.split(' ').length), 1);
+
+  const misheard = mishearingsFor(name);
+  const spellings = [name, ...misheard.bare, ...misheard.prefixed].filter(Boolean).map(escapeRegex);
+  const tailPattern = spellings.length
+    ? new RegExp(`\\b(?:(?:${GREETINGS.join('|')})\\s+)?(?:${spellings.join('|')})\\b[\\s,.!?-]*`, 'i')
+    : null;
+
+  return { targets, longest, mostWords, tailPattern };
+}
+
+let cached = { phrase: null, matcher: null };
+
+/** The phrase the user has configured, or Buddy's own name before /health answers. */
+function configuredPhrase() {
+  return (runtime.identity && runtime.identity.wakeWord) || DEFAULT_WAKE_PHRASE;
+}
+
+function matcherFor(phrase) {
+  const wanted = phrase || configuredPhrase();
+  if (cached.phrase !== wanted) cached = { phrase: wanted, matcher: buildMatcher(wanted) };
+  return cached.matcher;
+}
+
+/**
+ * Fuzzy match, so the mishearings a microphone produces still wake Buddy up.
+ *
+ * `phrase` is only passed by the tests and by anything checking a phrase other
+ * than the live one; ordinary callers get whichever wake word is configured.
+ */
+export function isWakePhrase(transcript, phrase) {
+  const normalised = flatten(transcript);
   if (!normalised) return false;
 
-  for (const target of WAKE_TARGETS) {
+  const { targets, longest, mostWords } = matcherFor(phrase);
+
+  for (const target of targets) {
     if (normalised.includes(target)) return true;
   }
 
   const words = normalised.split(' ');
-  for (let size = 1; size <= 3; size++) {
+  for (let size = 1; size <= mostWords; size++) {
     for (let start = 0; start + size <= words.length; start++) {
-      const phrase = words.slice(start, start + size).join(' ');
-      if (phrase.length < 4 || phrase.length > 16) continue;
-      for (const target of WAKE_TARGETS) {
+      const candidate = words.slice(start, start + size).join(' ');
+      // Too short to be anything but a coincidence, or too long to be a slip.
+      if (candidate.length < 4 || candidate.length > longest + 4) continue;
+      for (const target of targets) {
         const budget = target.length <= 8 ? 1 : 2;
-        if (levenshtein(phrase, target) <= budget) return true;
+        if (levenshtein(candidate, target) <= budget) return true;
       }
     }
   }
@@ -89,9 +194,12 @@ export function isWakePhrase(transcript) {
  * Whatever followed the wake phrase, if the user ran straight on: "hey buddy what
  * time is it" should not need asking twice. Returns '' when they only said the name.
  */
-export function tailAfterWake(transcript) {
+export function tailAfterWake(transcript, phrase) {
+  const { tailPattern } = matcherFor(phrase);
+  if (!tailPattern) return '';
+
   const text = String(transcript || '').trim();
-  const match = text.match(/\b(?:hey|hi|ok|okay|yo)\s+bud(?:dy|die|dha)?\b[\s,.!?-]*/i);
+  const match = text.match(tailPattern);
   if (!match) return '';
   const tail = text.slice(match.index + match[0].length).trim();
   // Two words is the floor for something worth treating as a question.
@@ -291,10 +399,12 @@ export function initOrb() {
 
   function refreshHotState() {
     const hot = listening();
+    const ask = `Ask ${buddyName()}`;
     stage.classList.toggle('hot', hot);
-    if (!voiceInputAvailable()) tooltip.textContent = 'Ask Buddy (listening is off)';
+    orb.setAttribute('aria-label', ask);
+    if (!voiceInputAvailable()) tooltip.textContent = `${ask} (listening is off)`;
     else if (mode === 'question') tooltip.textContent = 'Go ahead…';
-    else tooltip.textContent = hot ? 'Listening for “Hey Buddy”' : 'Ask Buddy';
+    else tooltip.textContent = hot ? `Listening for “${wakePhrase()}”` : ask;
   }
 
   // ── click vs. drag ──────────────────────────────────────────────────────
@@ -713,13 +823,24 @@ export function initOrb() {
    * idle timers and keeps that promise honest. It costs about 1.4 GB of memory,
    * which is why it only happens while listening is switched on.
    */
+  /**
+   * Keep the engines warm while Buddy is listening, so answering its name is
+   * not preceded by a model load.
+   *
+   * The heartbeat is deliberately a *maintenance* ping. It holds on to what is
+   * already loaded and never loads anything itself — because an unconditional
+   * one every five minutes outran the server's own idle-unload timers, and the
+   * memory those exist to give back was never given back at all. Once Buddy has
+   * genuinely been unused long enough to unload, it stays unloaded until it is
+   * actually wanted; hearing its name warms it for real, just below.
+   */
   function keepWarm(on) {
     clearInterval(keepWarmTimer);
     keepWarmTimer = null;
     if (!on) return;
     api('/warm', {}).catch(() => {});
     keepWarmTimer = setInterval(() => {
-      api('/warm', {}).catch(() => {});
+      api('/warm', { maintain: true }).catch(() => {});
     }, 5 * 60 * 1000);
   }
 
@@ -813,6 +934,9 @@ export function initOrb() {
    */
   window.buddy.onRuntimeChanged(async () => {
     await refreshRuntime();
+    // Colour, theme and size all live in settings, so a change there has to
+    // repaint the orb — it is a separate window and nothing else will.
+    applyLookFromRuntime();
     if (wakeEnabled && voiceInputAvailable() && !microphone) startListening();
     else if (!voiceInputAvailable() && microphone) stopListening();
     refreshHotState();

@@ -10,6 +10,8 @@ import {
   api,
   boot,
   runtime,
+  buddyName,
+  wakePhrase,
   refreshRuntime,
   renderMarkdown,
   voiceInputAvailable,
@@ -17,6 +19,7 @@ import {
 import { openMicrophone, createVoiceDetector, samplesToBase64 } from './capture.js';
 import { createSpeaker } from './speech.js';
 import { createSettings } from './settings.js';
+import { applyLookFromRuntime } from './theme.js';
 import { isWakePhrase } from './orb.js';
 
 export function initPanel() {
@@ -30,6 +33,19 @@ export function initPanel() {
 
   let sessionId = null;
   let busy = false;
+
+  /**
+   * Put whatever Buddy is currently called into the chrome that names it. The
+   * header is the obvious one; the placeholder matters just as much, because
+   * "Ask Buddy anything…" under a panel headed "Ada" reads as a bug.
+   */
+  function applyIdentity() {
+    const name = buddyName();
+    $('panel-name').textContent = name;
+    input.placeholder = `Ask ${name} anything…`;
+    $('open-settings').setAttribute('aria-label', `Open settings for ${name}`);
+    $('close-panel').setAttribute('aria-label', `Close ${name}`);
+  }
 
   /**
    * Keep the orb pointed at the same conversation. Both windows talk to the
@@ -65,7 +81,7 @@ export function initPanel() {
     messages.scrollTop = messages.scrollHeight;
   }
 
-  function addMessage(role, content, { markdown = false } = {}) {
+  function addMessage(role, content, { markdown = false, images = [] } = {}) {
     const row = document.createElement('div');
     row.className = `msg ${role}`;
 
@@ -77,8 +93,28 @@ export function initPanel() {
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    if (markdown) bubble.innerHTML = renderMarkdown(content);
-    else bubble.textContent = content;
+
+    // Pictures go above the text they were sent with, which is the order they
+    // were meant in: here is a thing, and here is my question about it.
+    for (const image of images) {
+      // Old pictures are aged out of saved chats to keep them from growing
+      // without bound; the message still says one was there.
+      if (!image.data) {
+        const gone = document.createElement('span');
+        gone.className = 'bubble-image-gone';
+        gone.textContent = `🖼 ${image.name || 'picture'} — no longer kept`;
+        bubble.appendChild(gone);
+        continue;
+      }
+      const thumb = document.createElement('img');
+      thumb.className = 'bubble-image';
+      thumb.src = `data:${image.mime};base64,${image.data}`;
+      thumb.alt = image.name || 'An attached picture';
+      bubble.appendChild(thumb);
+    }
+
+    if (markdown) bubble.insertAdjacentHTML('beforeend', renderMarkdown(content));
+    else if (content) bubble.appendChild(document.createTextNode(content));
 
     row.appendChild(bubble);
     messages.appendChild(row);
@@ -105,20 +141,191 @@ export function initPanel() {
     speaker.speak(text);
   }
 
+  // ── pictures ────────────────────────────────────────────────────────────
+
+  /**
+   * Buddy only has eyes when something with eyes is answering. The paperclip is
+   * hidden rather than disabled when it does not — a control that is visible but
+   * refuses is a worse answer to "can it look at this?" than no control at all,
+   * and the tooltip on the greyed-out version is not where anyone would look.
+   */
+  const attachButton = $('attach');
+  const picker = $('image-picker');
+  const tray = $('attachments');
+
+  /** @type {Array<{ mime: string, data: string, name: string }>} */
+  let pending = [];
+
+  const MAX_PENDING = 4;
+  const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+  const screenButton = $('see-screen');
+
+  function applyVisionAvailability() {
+    const blind = runtime.canSee === false;
+    attachButton.hidden = blind;
+    screenButton.hidden = blind;
+    screenButton.title = `Show ${buddyName()} your screen`;
+    if (blind && pending.length) {
+      pending = [];
+      renderAttachments();
+    }
+  }
+
+  /**
+   * Take a picture of the screen and queue it like any other attachment.
+   *
+   * It lands in the tray rather than sending immediately, so the shot can be
+   * looked at — and thrown away — before it goes anywhere. That matters more
+   * than usual here: a screenshot catches whatever else was on screen, and if
+   * the brain is a cloud provider it is about to leave the machine.
+   */
+  screenButton.addEventListener('click', async () => {
+    if (pending.length >= MAX_PENDING) {
+      addMessage('note', `Only ${MAX_PENDING} pictures at a time.`);
+      return;
+    }
+    screenButton.disabled = true;
+    try {
+      const shot = await window.buddy.captureScreen();
+      if (!shot || !shot.ok) {
+        addMessage('error', `Couldn't capture the screen: ${(shot && shot.error) || 'unknown error'}`);
+        return;
+      }
+      pending.push({ mime: shot.mime, data: shot.data, name: shot.name });
+      renderAttachments();
+      if (!input.value.trim()) input.value = 'What do you see here?';
+      input.focus();
+    } finally {
+      screenButton.disabled = false;
+    }
+  });
+
+  function renderAttachments() {
+    tray.replaceChildren();
+    tray.hidden = pending.length === 0;
+
+    pending.forEach((image, index) => {
+      const cell = document.createElement('div');
+      cell.className = 'attachment';
+
+      const thumb = document.createElement('img');
+      thumb.src = `data:${image.mime};base64,${image.data}`;
+      thumb.alt = image.name;
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.title = `Remove ${image.name}`;
+      remove.setAttribute('aria-label', `Remove ${image.name}`);
+      remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>';
+      remove.addEventListener('click', () => {
+        pending.splice(index, 1);
+        renderAttachments();
+      });
+
+      cell.append(thumb, remove);
+      tray.appendChild(cell);
+    });
+  }
+
+  /** Read one file into the base64 the server and every provider want. */
+  function readImage(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onerror = () => resolve(null);
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const comma = result.indexOf(',');
+        if (comma < 0) return resolve(null);
+        resolve({ mime: file.type, data: result.slice(comma + 1), name: file.name || 'picture' });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function attachFiles(fileList) {
+    const files = [...(fileList || [])].filter((file) => file && file.type.startsWith('image/'));
+    if (!files.length) return;
+
+    if (runtime.canSee === false) {
+      addMessage('note', `${buddyName()} cannot look at pictures with its current brain — see Settings ▸ Brain.`);
+      return;
+    }
+
+    for (const file of files) {
+      if (pending.length >= MAX_PENDING) {
+        addMessage('note', `Only ${MAX_PENDING} pictures at a time.`);
+        break;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        addMessage('note', `${file.name} is too big — 4 MB is the limit.`);
+        continue;
+      }
+      const image = await readImage(file);
+      if (image) pending.push(image);
+    }
+    renderAttachments();
+    input.focus();
+  }
+
+  attachButton.addEventListener('click', () => picker.click());
+  picker.addEventListener('change', async () => {
+    await attachFiles(picker.files);
+    // Reset, or picking the same file twice in a row fires nothing the second time.
+    picker.value = '';
+  });
+
+  // Paste a screenshot straight in — the fastest path there is, and the one
+  // people try first after hitting PrtScn.
+  input.addEventListener('paste', (event) => {
+    const items = [...((event.clipboardData && event.clipboardData.files) || [])];
+    if (items.some((file) => file.type.startsWith('image/'))) {
+      event.preventDefault();
+      attachFiles(items);
+    }
+  });
+
+  const panelRoot = document.querySelector('#root-panel .panel');
+  let dragDepth = 0;
+
+  // dragenter/dragleave fire for every child element crossed, so a plain
+  // toggle flickers the whole time the pointer is moving over the panel.
+  panelRoot.addEventListener('dragenter', (event) => {
+    event.preventDefault();
+    dragDepth += 1;
+    panelRoot.classList.add('dropping');
+  });
+  panelRoot.addEventListener('dragover', (event) => event.preventDefault());
+  panelRoot.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) panelRoot.classList.remove('dropping');
+  });
+  panelRoot.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dragDepth = 0;
+    panelRoot.classList.remove('dropping');
+    attachFiles(event.dataTransfer && event.dataTransfer.files);
+  });
+
   async function send(text) {
     const content = String(text || '').trim();
-    if (!content || busy) return;
+    const images = pending;
+    // A picture on its own is a question — "what is this?" — so an empty box
+    // with something attached is still worth sending.
+    if ((!content && !images.length) || busy) return;
 
     speaker.stop();
-    addMessage('user', content);
+    addMessage('user', content, { images });
     input.value = '';
+    pending = [];
+    renderAttachments();
     setBusy(true);
     setStatus('thinking', 'busy');
 
     const typingRow = addTyping();
 
     try {
-      const payload = await api('/chat', { messages: [{ role: 'user', content }], sessionId });
+      const payload = await api('/chat', { messages: [{ role: 'user', content, images }], sessionId });
       typingRow.remove();
       setSession(payload.sessionId || sessionId);
       addMessage('buddy', payload.reply, { markdown: true });
@@ -172,7 +379,9 @@ export function initPanel() {
 
   function greet() {
     messages.replaceChildren();
-    addMessage('buddy', "Hey! I'm Buddy. Ask me anything, or say **“Hey Buddy”** any time.", { markdown: true });
+    addMessage('buddy', `Hey! I'm ${buddyName()}. Ask me anything, or say **“${wakePhrase()}”** any time.`, {
+      markdown: true,
+    });
   }
 
   function formatWhen(iso) {
@@ -274,7 +483,7 @@ export function initPanel() {
       messages.replaceChildren();
       for (const message of chat.messages) {
         if (message.role === 'assistant') addMessage('buddy', message.content, { markdown: true });
-        else addMessage('user', message.content);
+        else addMessage('user', message.content, { images: message.images || [] });
       }
       closeDrawer();
       setStatus('online');
@@ -316,8 +525,8 @@ export function initPanel() {
     micButton.title = available
       ? 'Tap to talk, tap again to send'
       : runtime.providers.asr === 'off'
-        ? 'Buddy is set not to listen — turn hearing on in settings'
-        : "Buddy's ears are still downloading";
+        ? `${buddyName()} is set not to listen — turn hearing on in settings`
+        : `${buddyName()}'s ears are still downloading`;
   }
 
   async function stopRecording({ send: shouldSend = true } = {}) {
@@ -371,7 +580,7 @@ export function initPanel() {
     try {
       microphone = await openMicrophone();
     } catch {
-      addMessage('error', "I can't reach the microphone. Check your system's mic permissions for Buddy.");
+      addMessage('error', `I can't reach the microphone. Check your system's mic permissions for ${buddyName()}.`);
       return;
     }
 
@@ -405,7 +614,7 @@ export function initPanel() {
       throw new Error('Listening is turned off.');
     }
     if (runtime.hearingReady === false) {
-      say('engine', 'fail', "Buddy's ears have not finished downloading yet.");
+      say('engine', 'fail', `${buddyName()}'s ears have not finished downloading yet.`);
       throw new Error('The transcription engine is not ready.');
     }
     say('engine', 'ok', runtime.providers.asr === 'local' ? 'Whisper, in the app' : runtime.providers.asr);
@@ -439,7 +648,7 @@ export function initPanel() {
       throw new Error(`The microphone would not open: ${error.message}`);
     }
     say('mic', 'ok', `${Math.round(mic.sampleRate / 1000)} kHz`);
-    say('level', 'run', 'say “Hey Buddy” now');
+    say('level', 'run', `say “${wakePhrase()}” now`);
     say('speech', 'run');
 
     mic.beginClip(0);
@@ -483,8 +692,14 @@ export function initPanel() {
 
       // 7. and would that have woken Buddy?
       const matched = isWakePhrase(heard);
-      say('match', matched ? 'ok' : 'fail', matched ? 'yes — this would wake Buddy' : 'not close enough to “Hey Buddy”');
-      return matched ? `Working. Heard “${heard}”.` : `Heard “${heard}”, which is not close enough to “Hey Buddy”.`;
+      const name = buddyName();
+      const phrase = wakePhrase();
+      say(
+        'match',
+        matched ? 'ok' : 'fail',
+        matched ? `yes — this would wake ${name}` : `not close enough to “${phrase}”`
+      );
+      return matched ? `Working. Heard “${heard}”.` : `Heard “${heard}”, which is not close enough to “${phrase}”.`;
     } finally {
       finished = () => {};
       await mic.close();
@@ -547,6 +762,14 @@ export function initPanel() {
   }
 
   equalizer.addEventListener('click', stopSpeaking);
+  // It is announced as a button and can be tabbed to, so it has to answer to the
+  // keys a button answers to — Escape alone would be a lie to anyone not using a
+  // mouse.
+  equalizer.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    stopSpeaking();
+  });
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
@@ -579,6 +802,9 @@ export function initPanel() {
 
   window.buddy.onRuntimeChanged(async () => {
     await refreshRuntime();
+    applyLookFromRuntime();
+    applyIdentity();
+    applyVisionAvailability();
     applyVoiceInputAvailability();
   });
 
@@ -599,6 +825,8 @@ export function initPanel() {
     if (id && !sessionId) sessionId = id;
   });
 
+  applyIdentity();
+  applyVisionAvailability();
   applyVoiceInputAvailability();
   setStatus('online');
   greet();

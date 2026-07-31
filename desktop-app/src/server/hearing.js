@@ -85,6 +85,8 @@ function isReady(configDir, name) {
 
 // ── loading ───────────────────────────────────────────────────────────────
 
+const isLoaded = () => Boolean(transcriber);
+
 function scheduleIdleUnload() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => unload(), IDLE_UNLOAD_MS);
@@ -148,9 +150,12 @@ async function unload() {
   }
 }
 
-async function warmUp(configDir, name) {
+/** See builtin.warmUp — `maintain` means "keep it warm", never "load it". */
+async function warmUp(configDir, name, { maintain = false } = {}) {
+  if (maintain && !isLoaded()) return;
+  const wasLoaded = isLoaded();
   await load(configDir, name);
-  scheduleIdleUnload();
+  if (!wasLoaded) scheduleIdleUnload();
 }
 
 // ── what counts as having heard something ─────────────────────────────────
@@ -263,5 +268,5 @@ module.exports = {
   transcribe,
   meaningfulText,
   snapshot: () => hf.snapshot('hearing'),
-  isLoaded: () => Boolean(transcriber),
+  isLoaded,
 };

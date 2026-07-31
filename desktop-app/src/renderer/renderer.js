@@ -6,6 +6,7 @@
 'use strict';
 
 import { MODE, FLAT, $, loadBoot, refreshRuntime } from './core.js';
+import { applyLookFromRuntime, watchSystemTheme } from './theme.js';
 import { initOrb } from './orb.js';
 import { initPanel } from './panel.js';
 import { initSetup } from './setup.js';
@@ -21,6 +22,11 @@ async function main() {
   await loadBoot();
   // Where each capability runs decides what the UI can offer.
   await refreshRuntime();
+
+  // Paint before anything is shown, so no window flashes the default colours on
+  // its way to the ones the user actually chose.
+  applyLookFromRuntime();
+  watchSystemTheme();
 
   if (MODE === 'orb') initOrb();
   else if (MODE === 'setup') initSetup();

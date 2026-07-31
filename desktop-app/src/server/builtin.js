@@ -159,9 +159,25 @@ function chat({ modelPath, messages, maxTokens }) {
   return run;
 }
 
-async function warmUp(modelPath) {
+/**
+ * Load the model now so the next reply does not have to wait for it.
+ *
+ * `maintain` marks a periodic keep-warm ping rather than somebody actually
+ * wanting the model, and the distinction is the whole point of this function.
+ * The orb pings every five minutes for as long as the wake word is on; treating
+ * those as use reset the idle timer below long before its thirty minutes could
+ * ever elapse, so several gigabytes of weights stayed resident for the entire
+ * life of the app whether or not anyone had spoken to Buddy all day.
+ *
+ * A maintenance ping now keeps a warm model warm and leaves a cold one cold.
+ * Only a real load starts the idle clock, and only a real reply — see chat()
+ * — pushes it back.
+ */
+async function warmUp(modelPath, { maintain = false } = {}) {
+  if (maintain && !loaded) return;
+  const wasLoaded = Boolean(loaded);
   await load(modelPath);
-  scheduleIdleUnload();
+  if (!wasLoaded) scheduleIdleUnload();
 }
 
 module.exports = { chat, warmUp, unload, isLoaded: () => Boolean(loaded), CONTEXT_SIZE };

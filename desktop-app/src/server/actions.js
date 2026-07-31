@@ -26,6 +26,13 @@ const path = require('path');
 const files = require('./files.js');
 
 /**
+ * What this machine calls the place deleted files go. Said out loud to the user
+ * and written into the model's instructions, so it has to be the name they will
+ * actually see when they go looking for the file.
+ */
+const BIN = process.platform === 'win32' ? 'Recycle Bin' : 'Trash';
+
+/**
  * Everything Buddy is allowed to do, and how to check the argument.
  *
  * `fields: 2` means the marker carries a path and a body separated by the first
@@ -99,7 +106,7 @@ const ACTIONS = {
     summary: 'read a file',
     needsFiles: true,
     validate(argument, context) {
-      const found = files.resolveWithin(context.fileRoots, argument);
+      const found = files.resolveWithin(context.readRoots, argument);
       if (!found.ok) return { ok: false, error: found.error };
       return { ok: true, value: found.path };
     },
@@ -114,7 +121,7 @@ const ACTIONS = {
       // "." and "" both mean "the folder you shared with me", which is what a
       // model reaches for when asked what files there are.
       const wanted = String(argument || '').trim();
-      const found = files.resolveWithin(context.fileRoots, wanted === '.' || !wanted ? './' : wanted);
+      const found = files.resolveWithin(context.readRoots, wanted === '.' || !wanted ? './' : wanted);
       if (!found.ok) return { ok: false, error: found.error };
       return { ok: true, value: found.path };
     },
@@ -127,7 +134,7 @@ const ACTIONS = {
     needsFiles: true,
     fields: 2,
     validate(argument, context) {
-      const found = files.resolveWithin(context.fileRoots, argument.path);
+      const found = files.resolveWithin(context.writeRoots, argument.path);
       if (!found.ok) return { ok: false, error: found.error };
       if (!argument.content) return { ok: false, error: 'there was no text to write' };
       return { ok: true, value: found.path, content: argument.content };
@@ -141,13 +148,31 @@ const ACTIONS = {
     needsFiles: true,
     fields: 2,
     validate(argument, context) {
-      const found = files.resolveWithin(context.fileRoots, argument.path);
+      const found = files.resolveWithin(context.writeRoots, argument.path);
       if (!found.ok) return { ok: false, error: found.error };
       if (!argument.content) return { ok: false, error: 'there was nothing to add' };
       return { ok: true, value: found.path, content: argument.content, append: true };
     },
     describe: (value) => `add to ${path.basename(value)}`,
     describeDone: (value) => `Added to ${path.basename(value)}`,
+  },
+
+  /**
+   * Checked against the write roots, not the read ones. Being able to see the
+   * whole machine is a reasonable thing to allow; being able to delete across
+   * the whole machine is not, and deleting is a write by any sensible reading
+   * of the word.
+   */
+  delete_file: {
+    summary: 'delete a file',
+    needsFiles: true,
+    validate(argument, context) {
+      const found = files.resolveWithin(context.writeRoots, argument);
+      if (!found.ok) return { ok: false, error: found.error };
+      return { ok: true, value: found.path };
+    },
+    describe: (value) => `delete ${path.basename(value)}`,
+    describeDone: (value) => `Deleted ${path.basename(value)}`,
   },
 };
 
@@ -219,9 +244,9 @@ const ACTION_INSTRUCTIONS =
 const REQUEST_PATTERN =
   /\b(open|opens|opening|launch|start up|go to|goto|visit|browse|pull up|bring up|take me to|show me|search|searching|look up|lookup|google|duckduckgo|find me|download)\b/i;
 
-/** The same idea for files: verbs about reading and writing them. */
+/** The same idea for files: verbs about reading, writing and getting rid of them. */
 const FILE_REQUEST_PATTERN =
-  /\b(file|files|folder|directory|note|notes|write|writes|writing|save|saves|saving|edit|edits|editing|append|add to|create|read|list|rename|txt|markdown|\.md)\b/i;
+  /\b(file|files|folder|directory|note|notes|write|writes|writing|save|saves|saving|edit|edits|editing|append|add to|create|read|list|rename|delete|deletes|deleting|remove|removes|removing|erase|bin|trash|get rid of|throw away|txt|markdown|\.md)\b/i;
 
 function looksLikeRequest(text, { allowFiles = false } = {}) {
   const source = String(text || '');
@@ -240,19 +265,39 @@ function looksLikeRequest(text, { allowFiles = false } = {}) {
  * to write invents a path, gets refused, and apologises — which reads to the
  * user as the feature being broken.
  */
-function instructionsFor({ allowFiles = false, fileRoots = [] } = {}) {
-  if (!allowFiles || !fileRoots.length) return ACTION_INSTRUCTIONS;
+function instructionsFor({ allowFiles = false, fileRoots = [], fileScope = 'folders', readRoots = [] } = {}) {
+  const wide = fileScope === 'everywhere';
+  // Wide scope is enough on its own: there is always somewhere to read, even
+  // before a single folder has been named. Narrow scope still needs a folder.
+  if (!allowFiles || (!fileRoots.length && !wide)) return ACTION_INSTRUCTIONS;
 
   const folders = fileRoots.map((root) => `  ${root}`).join('\n');
+  const places = readRoots.map((root) => `  ${root}`).join('\n');
+
+  /**
+   * What the model is told it can see. Getting this wrong in either direction
+   * is expensive: told it can read anything when it cannot, it invents paths
+   * and apologises; told it is confined when it is not, it refuses things the
+   * user explicitly allowed.
+   */
+  const scope = wide
+    ? 'You can read and list ANY file or folder on this computer. These are the ' +
+      'places to start from:\n' +
+      `${places}\n\n` +
+      (fileRoots.length
+        ? 'You can only WRITE or DELETE inside these folders:\n' + `${folders}\n\n`
+        : 'You cannot write to or delete any file — no folder has been shared for that yet.\n\n')
+    : 'You can also read, write and delete files, but ONLY inside these folders:\n' + `${folders}\n\n`;
+
   return (
     `${ACTION_INSTRUCTIONS}\n\n` +
-    'You can also read and write files, but ONLY inside these folders:\n' +
-    `${folders}\n\n` +
+    scope +
     'The markers are:\n' +
     '  [[read_file: name.txt]]\n' +
     '  [[list_folder: .]]\n' +
     '  [[write_file: name.txt | the entire new contents of the file]]\n' +
     '  [[append_file: name.txt | the text to add on the end]]\n' +
+    '  [[delete_file: name.txt]]\n' +
     '\n' +
     'Examples of exactly what to write:\n' +
     '\n' +
@@ -268,9 +313,19 @@ function instructionsFor({ allowFiles = false, fileRoots = [] } = {}) {
     'You: Added it.\n' +
     '[[append_file: shopping.txt | milk]]\n' +
     '\n' +
+    'User: delete bins.txt\n' +
+    `You: Deleted it — it is in the ${BIN} if you want it back.\n` +
+    '[[delete_file: bins.txt]]\n' +
+    '\n' +
     'write_file replaces the whole file, so give the complete new contents, not ' +
     'just the change. The previous version is kept as a .bak file automatically. ' +
-    'Use a plain file name — you cannot write anywhere outside the folders above.'
+    `delete_file only ever deletes the one file named, and it goes to the ${BIN} ` +
+    'rather than being destroyed, so say so rather than warning that it is ' +
+    'permanent. Only delete when you have been asked to delete. ' +
+    (wide
+      ? 'To read something, give its full path. To write or delete, use a plain file ' +
+        'name — those are limited to the folders listed above even though reading is not.'
+      : 'Use a plain file name — you cannot write to or delete anything outside the folders above.')
   );
 }
 
@@ -292,6 +347,11 @@ const ALIASES = {
   search_the_web: 'search_web',
   folder: 'open_folder',
   open_directory: 'open_folder',
+  delete: 'delete_file',
+  remove: 'delete_file',
+  remove_file: 'delete_file',
+  erase_file: 'delete_file',
+  trash_file: 'delete_file',
 };
 
 /**

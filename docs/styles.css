@@ -117,58 +117,18 @@ code {
   flex: 0 0 auto;
 }
 
-.orb-xs {
-  width: 15px;
-  height: 15px;
-}
-
 .orb-lg {
   width: 42px;
   height: 42px;
   margin-bottom: 26px;
 }
 
-/* ── header ──────────────────────────────────────────────────────────────── */
-
-.top {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: rgba(10, 10, 11, 0.82);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.top-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 60px;
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font-weight: 560;
-  letter-spacing: -0.01em;
-}
-
-.top-nav {
-  display: flex;
-  gap: 24px;
-  font-size: 14.5px;
-  color: var(--muted);
-}
-
-.top-nav a:hover {
-  color: var(--text);
-}
-
 /* ── hero ────────────────────────────────────────────────────────────────── */
 
+/* Nothing sits above this any more, so the hero carries the top margin the
+   header used to provide. */
 .hero {
-  padding: 56px 0 64px;
+  padding: 76px 0 64px;
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -289,9 +249,10 @@ code {
   border-bottom: 1px solid var(--line-soft);
 }
 
-/* The header is sticky, so an anchor jump has to stop short of it. */
+/* An anchor jump landing flush against the viewport edge reads as a cut-off
+   page, so every target keeps a little air above it. */
 [id] {
-  scroll-margin-top: 78px;
+  scroll-margin-top: 24px;
 }
 
 .band h2 {
@@ -547,25 +508,12 @@ tbody tr:last-child td {
   }
 }
 
-/* Four nav links plus the wordmark do not fit on a phone; the section links go
-   and Download stays, which is the only one anybody came for. */
-@media (max-width: 520px) {
-  .top-nav a[href="#does"],
-  .top-nav a[href="#privacy"] {
-    display: none;
-  }
-}
-
 @media (max-width: 719px) {
   :root {
     --gutter: 22px;
   }
   .hero {
-    padding: 40px 0 48px;
-  }
-  .top-nav {
-    gap: 16px;
-    font-size: 13.5px;
+    padding: 48px 0 48px;
   }
   .shot img {
     max-width: 300px;

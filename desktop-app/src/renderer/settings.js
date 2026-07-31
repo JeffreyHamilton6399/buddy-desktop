@@ -11,10 +11,33 @@
  */
 'use strict';
 
-import { $, api, boot, runtime, refreshRuntime, formatBytes, describeProgress } from './core.js';
+import {
+  $,
+  api,
+  boot,
+  runtime,
+  buddyName,
+  wakePhrase,
+  binName,
+  refreshRuntime,
+  formatBytes,
+  describeProgress,
+} from './core.js';
 import { previewVoice } from './speech.js';
+import { ACCENT_PRESETS, accentStops, applyLook } from './theme.js';
 
-const POLL_MS = 700;
+/**
+ * How often the open settings pane re-reads the world.
+ *
+ * The fast rate exists for progress bars: a download that only moves every
+ * three seconds looks stalled. Nothing else in here changes on that timescale,
+ * so once nothing is downloading or loading the pane drops to the slow rate —
+ * three requests a second, forever, for a pane somebody left open and walked
+ * away from is a poor way to treat a machine that is also running a language
+ * model.
+ */
+const POLL_BUSY_MS = 700;
+const POLL_IDLE_MS = 4000;
 
 /**
  * @param {{ onChanged?: () => void,
@@ -29,6 +52,8 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   let pollTimer = null;
   let visible = false;
   let voicesLoaded = false;
+  /** Set by the renders below when something is genuinely moving. */
+  let workInFlight = false;
 
   // ── plumbing ────────────────────────────────────────────────────────────
 
@@ -233,6 +258,9 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       $('model-list').textContent = `Couldn't read the model list: ${error.message}`;
       return;
     }
+
+    const busy = (entry) => entry.status === 'downloading' || entry.status === 'verifying';
+    if (payload.models.some(busy)) workInFlight = true;
 
     const list = $('model-list');
     const matching = payload.models.filter(matchesSearch);
@@ -875,14 +903,50 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   function applyDoingPane() {
     $('allow-actions').checked = Boolean(runtime.allowActions);
     $('allow-files').checked = Boolean(runtime.allowFiles);
+    // Named for this machine, since the copy tells the user where to go looking.
+    $('bin-name').textContent = binName();
     applyActionsNote();
+    applyFileScope();
     renderFileRoots();
 
     const note = $('files-note');
     if (!runtime.allowFiles) note.textContent = '';
-    else if (!(runtime.fileRoots || []).length) note.textContent = 'Add a folder to make this do anything.';
-    else note.textContent = 'Buddy can only ever reach these folders.';
+    else if (!(runtime.fileRoots || []).length) {
+      note.textContent =
+        runtime.fileScope === 'everywhere'
+          ? 'Buddy can read anything, but cannot write or delete until you add a folder.'
+          : 'Add a folder to make this do anything.';
+    } else note.textContent = 'These are the only folders Buddy can write to or delete in.';
   }
+
+  /**
+   * Which of the two scopes is on, and what it actually means on this machine.
+   *
+   * The drives are spelled out rather than described as "everywhere", because
+   * "everywhere" is exactly the kind of promise a permission screen should not
+   * be making vaguely.
+   */
+  function applyFileScope() {
+    const wide = runtime.fileScope === 'everywhere';
+    $('scope-folders').classList.toggle('is-on', !wide);
+    $('scope-everywhere').classList.toggle('is-on', wide);
+
+    const where = (runtime.machineRoots || []).join(', ');
+    $('scope-note').textContent = wide
+      ? `Buddy can read and list anything under ${where || 'this computer'}. It still cannot write to or delete anything outside the folders below, and it will not touch programs, keys or databases whatever the setting says.`
+      : 'Buddy cannot see that a file exists unless it is inside a folder you have added.';
+  }
+
+  async function setFileScope(fileScope) {
+    if (!(await save({ fileScope }))) return;
+    applyDoingPane();
+    setNote(
+      fileScope === 'everywhere' ? 'Buddy can look anywhere on this computer.' : 'Buddy is back to the folders you pick.'
+    );
+  }
+
+  $('scope-folders').addEventListener('click', () => setFileScope('folders'));
+  $('scope-everywhere').addEventListener('click', () => setFileScope('everywhere'));
 
   /**
    * Say plainly how well this is likely to go. Emitting a structured action on
@@ -1002,7 +1066,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
 
     button.disabled = true;
     resetProbe();
-    testNote.textContent = 'Say “Hey Buddy”…';
+    testNote.textContent = `Say “${wakePhrase()}”…`;
     try {
       testNote.textContent = (await onRequestMicTest(reportStep)) || '';
     } catch (error) {
@@ -1031,8 +1095,10 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
 
     bar.style.width = `${state.percent || 0}%`;
 
+    const name = buddyName();
+
     if (state.status === 'downloading' || state.status === 'loading') {
-      title.textContent = which === 'voice' ? 'Downloading Buddy’s voice…' : 'Downloading Buddy’s ears…';
+      title.textContent = which === 'voice' ? `Downloading ${name}’s voice…` : `Downloading ${name}’s ears…`;
       sub.textContent = describeProgress(state) || 'Starting…';
       button.hidden = true;
     } else if (state.status === 'error') {
@@ -1042,7 +1108,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       button.textContent = 'Try again';
     } else {
       title.textContent =
-        which === 'voice' ? 'Buddy’s own voice isn’t downloaded yet' : 'Buddy’s ears aren’t downloaded yet';
+        which === 'voice' ? `${name}’s own voice isn’t downloaded yet` : `${name}’s ears aren’t downloaded yet`;
       sub.textContent =
         which === 'voice'
           ? 'A one-time 156 MB download. After it, speaking never needs the internet.'
@@ -1061,10 +1127,13 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       renderAsset('voice', state.voice);
       renderAsset('hearing', state.hearing);
 
+      const moving = (entry) => entry.status === 'downloading' || entry.status === 'loading';
+      if (moving(state.voice) || moving(state.hearing)) workInFlight = true;
+
       if (state.voice.ready && !voicesLoaded && runtime.providers.tts === 'kokoro') await loadVoices();
 
       // A download finishing changes what the rest of the app may offer, but this
-      // polls every 700ms — so only tell anyone when the answer actually moves.
+      // polls repeatedly — so only tell anyone when the answer actually moves.
       const now = `${state.voice.ready}:${state.hearing.ready}`;
       if (lastAssetState && now !== lastAssetState) {
         await refreshRuntime();
@@ -1087,6 +1156,175 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       }
       await renderAssets();
     });
+  }
+
+  // ── name, colour, theme, size ───────────────────────────────────────────
+
+  /**
+   * Everything in this pane repaints the app the instant it is saved, so each
+   * control writes through on change and lets the runtime broadcast do the rest.
+   * The two text fields are the exception: saving on every keystroke would send
+   * a settings write per letter and rename Buddy to "A", then "Ad", then "Ada".
+   */
+  const nameField = $('buddy-name');
+  const wakeField = $('wake-word');
+
+  function renderSwatches() {
+    const swatches = $('accent-swatches');
+    const current = (runtime.look || {}).accent;
+    swatches.replaceChildren();
+
+    for (const preset of ACCENT_PRESETS) {
+      const stops = accentStops(preset.accent);
+      const rgb = ({ r, g, b }) => `rgb(${r}, ${g}, ${b})`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'swatch' + (preset.accent === current ? ' is-on' : '');
+      button.title = preset.label;
+      button.setAttribute('aria-label', preset.label);
+      button.style.background =
+        `radial-gradient(circle at 34% 30%, ${rgb(stops.amber)}, ${rgb(stops.rose)} 52%, ${rgb(stops.fuchsia)} 100%)`;
+      button.addEventListener('click', () => setAccent(preset.accent, preset.label));
+      swatches.appendChild(button);
+    }
+  }
+
+  async function setAccent(accent, label) {
+    // Paint first. A colour picker that waits for a round trip before showing
+    // the colour feels broken, and the save that follows is what makes it stick.
+    applyLook({ ...runtime.look, accent });
+    if (await save({ look: { accent } })) setNote(label ? `${label} it is.` : 'Colour changed.');
+    renderLook();
+  }
+
+  $('accent-custom').addEventListener('input', (event) => {
+    applyLook({ ...runtime.look, accent: event.target.value });
+  });
+  $('accent-custom').addEventListener('change', (event) => setAccent(event.target.value, ''));
+
+  $('theme-choice').addEventListener('change', async (event) => {
+    const theme = event.target.value;
+    applyLook({ ...runtime.look, theme });
+    await save({ look: { theme } });
+  });
+
+  function renderOrbSizes() {
+    const holder = $('orb-sizes');
+    const sizes = runtime.orbSizes || {};
+    const current = (runtime.look || {}).orbSize;
+    holder.replaceChildren();
+
+    for (const [id, size] of Object.entries(sizes)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'runs-choice' + (id === current ? ' is-on' : '');
+      const title = document.createElement('strong');
+      title.textContent = size.label || id;
+      const note = document.createElement('small');
+      note.textContent = `${size.visual}px across`;
+      button.append(title, note);
+      button.addEventListener('click', async () => {
+        applyLook({ ...runtime.look, orbSize: id });
+        await save({ look: { orbSize: id } });
+        renderLook();
+      });
+      holder.appendChild(button);
+    }
+  }
+
+  /**
+   * Whether a wake phrase stands a chance.
+   *
+   * Whisper needs something with enough syllables to recognise; one short word
+   * either never fires or fires at everything, and both of those are impossible
+   * to diagnose from the outside. Saying so here is much cheaper than the bug
+   * report that would otherwise follow.
+   */
+  function describeWakeWord(phrase) {
+    const words = String(phrase || '').trim().split(/\s+/).filter(Boolean);
+    const letters = words.join('').length;
+    if (!words.length) return { text: 'Buddy will answer to “Hey Buddy”.', warn: false };
+    if (letters <= 3) {
+      return { text: 'That is very short — expect it to be missed, or to fire at nothing.', warn: true };
+    }
+    if (words.length === 1 && letters <= 5) {
+      return { text: 'One short word will fire more often than you want. Try putting “Hey” in front of it.', warn: true };
+    }
+    if (words.length > 4) return { text: 'That is a lot to say every time. Two or three words works best.', warn: true };
+    return { text: `Say “${phrase.trim()}” and the orb wakes up. Greetings like “Okay” and “Hi” work too.`, warn: false };
+  }
+
+  function renderWakeNote() {
+    const { text, warn } = describeWakeWord(wakeField.value);
+    const note = $('wake-word-note');
+    note.textContent = text;
+    note.classList.toggle('bad', warn);
+  }
+
+  wakeField.addEventListener('input', renderWakeNote);
+
+  /** Commit a text field on blur or Enter, never per keystroke. */
+  function commitOnSettle(field, apply) {
+    const commit = async () => {
+      const value = field.value.trim();
+      if (value === field.dataset.saved) return;
+      await apply(value);
+      field.dataset.saved = value;
+    };
+    field.addEventListener('blur', commit);
+    field.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        field.blur();
+      }
+    });
+  }
+
+  commitOnSettle(nameField, async (value) => {
+    if (!(await save({ identity: { name: value } }))) return;
+    // The server has the last word on what the name became — it strips and caps
+    // it — so show what was actually stored rather than what was typed.
+    renderLook();
+    setNote(`Now called ${runtime.identity.name}.`);
+  });
+
+  commitOnSettle(wakeField, async (value) => {
+    if (!(await save({ identity: { wakeWord: value } }))) return;
+    renderLook();
+    setNote(`Answering to “${runtime.identity.wakeWord}”.`);
+  });
+
+  /** Push whatever the server now holds back into every control in this pane. */
+  function renderLook() {
+    const look = runtime.look || {};
+    const identity = runtime.identity || {};
+
+    nameField.value = identity.name || '';
+    nameField.dataset.saved = nameField.value;
+    wakeField.value = identity.wakeWord || '';
+    wakeField.dataset.saved = wakeField.value;
+    renderWakeNote();
+
+    $('accent-custom').value = look.accent || '#f43f5e';
+    $('theme-choice').value = look.theme || 'dark';
+    renderSwatches();
+    renderOrbSizes();
+
+    // The rest of the panel names Buddy in several places; keep those in step
+    // with the field the user is looking at right now.
+    applyNaming();
+  }
+
+  /**
+   * Copy elsewhere in settings that quotes the wake word. The asset titles are
+   * deliberately not here: renderAsset owns those and repaints them on a poll,
+   * so anything written from this side would be wiped within the second.
+   */
+  function applyNaming() {
+    const phrase = wakePhrase();
+    $('wake-toggle-label').textContent = `Answer to “${phrase}”`;
+    $('mic-test').textContent = `Test “${phrase}”`;
+    $('probe-match-label').textContent = `Matched “${phrase}”`;
   }
 
   // ── chats ───────────────────────────────────────────────────────────────
@@ -1145,7 +1383,10 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   // ── about ───────────────────────────────────────────────────────────────
 
   function renderAbout() {
-    $('about-version').textContent = `Buddy ${boot.version || ''} — a local-first AI companion.`.replace('  ', ' ');
+    $('about-version').textContent = `${buddyName()} ${boot.version || ''} — a local-first AI companion.`.replace(
+      '  ',
+      ' '
+    );
 
     const facts = $('about-facts');
     facts.replaceChildren();
@@ -1212,6 +1453,34 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
 
   $('open-folder').addEventListener('click', () => window.buddy.openConfigFolder());
 
+  // ── polling while the pane is open ──────────────────────────────────────
+
+  /**
+   * One pass, then schedule the next.
+   *
+   * A self-scheduling timeout rather than an interval, for two reasons: the
+   * three requests cannot pile up on top of each other when the machine is busy
+   * (an interval does not wait for the previous tick to finish), and the gap can
+   * be chosen afresh each time from whether anything is actually moving.
+   */
+  async function poll() {
+    if (!visible) return;
+    workInFlight = false;
+    await Promise.allSettled([renderAssets(), renderModels(), renderHeard()]);
+    if (!visible) return;
+    pollTimer = setTimeout(poll, workInFlight ? POLL_BUSY_MS : POLL_IDLE_MS);
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollTimer = setTimeout(poll, POLL_BUSY_MS);
+  }
+
+  function stopPolling() {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
   // ── open / close ────────────────────────────────────────────────────────
 
   async function renderAll() {
@@ -1219,6 +1488,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     applyHearingPanes();
     applyDoingPane();
     applyRuns();
+    renderLook();
     renderKeys();
     $('whisper-url').value = runtime.asrBaseUrl || '';
     renderAbout();
@@ -1243,19 +1513,13 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       await refreshRuntime();
       await renderAll();
       // Downloads and switches change under us, so keep the view honest while open.
-      clearInterval(pollTimer);
-      pollTimer = setInterval(() => {
-        renderAssets();
-        renderModels();
-        renderHeard();
-      }, POLL_MS);
+      startPolling();
     },
 
     close() {
       visible = false;
       sheet.hidden = true;
-      clearInterval(pollTimer);
-      pollTimer = null;
+      stopPolling();
       resetClear();
       setNote('');
     },

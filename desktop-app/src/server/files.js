@@ -13,6 +13,9 @@
  *     that actually exists before comparing.
  *   * Writes back up whatever was there first. A model that misunderstands
  *     "tidy up my notes" should cost you a `.bak` file, not your notes.
+ *   * Deletes go to the Recycle Bin and are never unlinked, and only ever a
+ *     file — never a folder. Same reasoning as the backups: a misunderstanding
+ *     should cost you a trip to the bin, not the afternoon's work.
  *   * Only text, and only so much of it. Buddy has no business rewriting a
  *     database or a disk image, and the size cap is what stops a loop from
  *     filling the drive.
@@ -42,6 +45,47 @@ const FORBIDDEN = new Set([
   '.lnk', '.reg', '.db', '.sqlite', '.sqlite3', '.iso', '.img', '.vhd',
   '.key', '.pem', '.pfx', '.p12', '.keychain',
 ]);
+
+/**
+ * Every place on this machine a path could start.
+ *
+ * This is what "let Buddy look anywhere" resolves to. It is deliberately a real
+ * list of roots rather than a flag that switches the checking off: the path is
+ * still resolved, symlinks are still followed, `..` is still collapsed, and the
+ * forbidden extensions still apply. Widening the scope widens what counts as
+ * inside — it does not remove the boundary.
+ */
+function machineRoots() {
+  if (process.platform !== 'win32') return ['/'];
+
+  const drives = [];
+  for (let letter = 'A'.charCodeAt(0); letter <= 'Z'.charCodeAt(0); letter++) {
+    const root = `${String.fromCharCode(letter)}:\\`;
+    try {
+      if (fs.existsSync(root)) drives.push(root);
+    } catch {
+      /* a drive that refuses to be asked is one Buddy cannot use anyway */
+    }
+  }
+  return drives;
+}
+
+/**
+ * Which roots apply, for reading and for writing.
+ *
+ * These are deliberately different. "See my whole computer" is a reasonable
+ * thing to want and costs you nothing if the model misunderstands; "write
+ * anywhere on my whole computer" is how a confused model ends up in
+ * C:\Windows\System32. So the wide scope widens reading and listing, and
+ * writing stays inside folders that were named by hand.
+ */
+function scopedRoots({ fileScope = 'folders', fileRoots = [] } = {}) {
+  const named = normaliseRoots(fileRoots);
+  return {
+    read: fileScope === 'everywhere' ? normaliseRoots(machineRoots()) : named,
+    write: named,
+  };
+}
 
 /** Absolute, resolved, de-duplicated. Anything unusable is dropped. */
 function normaliseRoots(list) {
@@ -202,11 +246,37 @@ async function listFolder(target) {
   return { ok: true, entries: rows, truncated: entries.length > MAX_LISTING };
 }
 
+/**
+ * May Buddy delete this?
+ *
+ * Deleting is the one operation with nothing kept behind it, so it is checked
+ * harder than the rest: files only. A folder is unbounded — "tidy up my notes"
+ * must never be able to mean the folder the notes live in — and the folder
+ * scoping cannot catch that on its own, since a shared folder is inside itself.
+ *
+ * The removal itself happens in main.js, because the only acceptable way to do
+ * it is Electron's shell.trashItem, which puts the file where the user already
+ * knows to look for it. This half only decides whether it may happen at all.
+ */
+async function checkDeletable(target) {
+  let stat;
+  try {
+    stat = await fsp.stat(target);
+  } catch {
+    return { ok: false, error: 'there is no such file' };
+  }
+  if (stat.isDirectory()) return { ok: false, error: 'that is a folder, and Buddy only deletes files' };
+  return { ok: true };
+}
+
 module.exports = {
   MAX_FILE_BYTES,
   normaliseRoots,
+  machineRoots,
+  scopedRoots,
   resolveWithin,
   readTextFile,
   writeTextFile,
   listFolder,
+  checkDeletable,
 };

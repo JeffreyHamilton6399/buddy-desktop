@@ -43,6 +43,7 @@ const crypto = require('crypto');
 
 const providers = require('./providers.js');
 const actions = require('./actions.js');
+const filesStore = require('./files.js');
 const builtin = require('./builtin.js');
 const keyStore = require('./keys.js');
 const cloud = require('./cloud.js');
@@ -67,18 +68,26 @@ const { History } = require('./history.js');
 const CONFIG_FILENAME = '.z-ai-config';
 const SETTINGS_FILENAME = 'buddy-settings.json';
 
-const SYSTEM_PROMPT =
-  'You are Buddy, a friendly, warm, concise local AI assistant that lives on ' +
+/**
+ * Who Buddy thinks it is.
+ *
+ * The name is a setting, so this is a function of it rather than a constant: a
+ * model told it is called Buddy while the window above it says "Ada" will
+ * cheerfully correct the user about their own assistant's name.
+ */
+const systemPrompt = (name) =>
+  `You are ${name}, a friendly, warm, concise local AI assistant that lives on ` +
   "the user's desktop. Keep replies short, natural, and friendly — like a " +
-  'helpful companion. Avoid long lists unless asked.';
+  `helpful companion. Avoid long lists unless asked. Your name is ${name}; use ` +
+  'it if you are asked what you are called.';
 
 /**
  * Spoken answers are a different medium. Every extra sentence is another second
  * of synthesis before the user hears anything and another few they have to sit
  * through, and markdown is meaningless out loud.
  */
-const SYSTEM_PROMPT_VOICE =
-  'You are Buddy, a friendly local AI assistant. You are being spoken aloud, so ' +
+const systemPromptVoice = (name) =>
+  `You are ${name}, a friendly local AI assistant. You are being spoken aloud, so ` +
   'answer in one or two short sentences of plain conversational English. No ' +
   'lists, no markdown, no code blocks. If the answer is genuinely long, give the ' +
   'short version and offer to say more.';
@@ -174,7 +183,15 @@ let settingsCache = null;
 function readSettings() {
   if (settingsCache) return settingsCache;
   try {
-    const onDisk = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+    /**
+     * The byte-order mark is stripped for the same reason buddy-state.json
+     * strips it in main.js, and the stakes here are higher. JSON.parse throws on
+     * a leading BOM, this catch then quietly hands back stock defaults, and the
+     * user's model, voice, folders and API provider all appear to have reset
+     * themselves — with the real settings still sitting intact on disk. Nothing
+     * Buddy writes has one; anything else that has ever touched the file might.
+     */
+    const onDisk = JSON.parse(fs.readFileSync(settingsPath(), 'utf8').replace(/^﻿/, ''));
     settingsCache = providers.normaliseSettings(providers.migrateSettings(onDisk));
   } catch {
     settingsCache = providers.normaliseSettings(null);
@@ -198,6 +215,8 @@ async function writeSettings(patch) {
     chat: { ...readSettings().chat, ...(patch.chat || {}) },
     tts: { ...readSettings().tts, ...(patch.tts || {}) },
     asr: { ...readSettings().asr, ...(patch.asr || {}) },
+    look: { ...readSettings().look, ...(patch.look || {}) },
+    identity: { ...readSettings().identity, ...(patch.identity || {}) },
   });
   await fsp.mkdir(configDir(), { recursive: true });
   await fsp.writeFile(settingsPath(), JSON.stringify(merged, null, 2));
@@ -509,11 +528,24 @@ function describeRuntime() {
       (providers.usesLocalVoice(settings) && !voiceReady) || (providers.usesLocalHearing(settings) && !hearingReady),
     cloud: providers.cloudCapabilities(settings),
     fullyLocal: providers.isFullyLocal(settings),
+    // Whether the composer should offer a paperclip at all.
+    canSee: providers.canSeeImages(settings),
+    // What Buddy is called and what it looks like. Every window reads these —
+    // the orb paints itself from them and the panel titles itself from them —
+    // so they ride along with the rest of the runtime rather than needing a
+    // route of their own.
+    look: settings.look,
+    identity: settings.identity,
+    orbSizes: providers.ORB_SIZES,
     saveHistory: settings.saveHistory,
     speakReplies: settings.speakReplies,
     allowActions: settings.allowActions,
     allowFiles: settings.allowFiles,
     fileRoots: settings.fileRoots,
+    fileScope: settings.fileScope,
+    // What "everywhere" actually means on this machine, so the settings pane can
+    // show it rather than promising something vague.
+    machineRoots: filesStore.machineRoots(),
   };
 }
 
@@ -692,10 +724,32 @@ async function handleModelDownload(_req, res) {
  * whatever an Ollama on this machine is offering. Ollama is probed rather than
  * assumed, so the picker can say "not running" instead of listing nothing.
  */
+/**
+ * The last answer from Ollama, and when it arrived.
+ *
+ * The settings pane polls /models several times a second while it is open so
+ * downloads animate, and each call used to reach out to Ollama's port. Where
+ * nothing is listening that costs a refused connection every time; where the
+ * port is filtered rather than refused it costs the full probe timeout, which is
+ * longer than the poll interval — so the probes pile up on top of each other.
+ * Which models Ollama has does not change on that timescale.
+ */
+const OLLAMA_CACHE_MS = 10 * 1000;
+let ollamaCache = { at: 0, baseUrl: '', models: null };
+
+async function ollamaModels(baseUrl) {
+  const fresh = Date.now() - ollamaCache.at < OLLAMA_CACHE_MS && ollamaCache.baseUrl === baseUrl;
+  if (fresh) return ollamaCache.models;
+
+  const models = await providers.listOllamaModels(baseUrl);
+  ollamaCache = { at: Date.now(), baseUrl, models };
+  return models;
+}
+
 async function handleListModels(_req, res) {
   const settings = readSettings();
   const catalog = modelStore.catalogSnapshot(configDir(), activeModelId(settings));
-  const installed = await providers.listOllamaModels(settings.chat.baseUrl);
+  const installed = await ollamaModels(settings.chat.baseUrl);
 
   return sendJson(res, 200, {
     ...catalog,
@@ -793,19 +847,26 @@ async function handleSpeechDownload(req, res) {
  * the one-off load. The orb calls this the instant it hears its name, which
  * overlaps the load with the moment the user spends asking their question.
  */
-async function warmEverything() {
+/**
+ * @param {{ maintain?: boolean }} options `maintain` is a periodic keep-warm
+ *   ping: it holds on to whatever is already loaded and loads nothing new. See
+ *   builtin.warmUp for why the difference matters so much.
+ */
+async function warmEverything({ maintain = false } = {}) {
   const settings = readSettings();
   const jobs = [];
 
   if (providers.usesBuiltinModel(settings)) {
     const id = activeModelId(settings);
-    if (modelStore.isReady(configDir(), id)) jobs.push(builtin.warmUp(modelStore.modelPath(configDir(), id)));
+    if (modelStore.isReady(configDir(), id)) {
+      jobs.push(builtin.warmUp(modelStore.modelPath(configDir(), id), { maintain }));
+    }
   }
   if (providers.usesLocalVoice(settings) && voice.isReady(configDir())) {
-    jobs.push(voice.warmUp(configDir(), { voice: settings.tts.voice || undefined }));
+    jobs.push(voice.warmUp(configDir(), { voice: settings.tts.voice || undefined, maintain }));
   }
   if (providers.usesLocalHearing(settings) && hearing.isReady(configDir(), settings.asr.localModel)) {
-    jobs.push(hearing.warmUp(configDir(), settings.asr.localModel));
+    jobs.push(hearing.warmUp(configDir(), settings.asr.localModel, { maintain }));
   }
 
   // Never let a warm-up failure surface as a request error; the real call will
@@ -813,8 +874,9 @@ async function warmEverything() {
   await Promise.allSettled(jobs);
 }
 
-async function handleWarm(_req, res) {
-  warmEverything().catch(() => {});
+async function handleWarm(req, res) {
+  const body = await readBody(req).catch(() => ({}));
+  warmEverything({ maintain: body && body.maintain === true }).catch(() => {});
   return sendJson(res, 202, {
     warming: {
       chat: builtin.isLoaded(),
@@ -876,6 +938,41 @@ function alwaysOffersActions(settings) {
   return Number.isFinite(parameters) && parameters >= 4;
 }
 
+/** Formats every vision API in use accepts, and that a browser can produce. */
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_IMAGES_PER_MESSAGE = 4;
+
+/**
+ * Whatever the renderer sent, reduced to pictures worth forwarding.
+ *
+ * The base64 is checked for shape rather than merely trusted: it is about to be
+ * interpolated into a `data:` URL and posted to somebody else's API, and a
+ * malformed one comes back as an opaque 400 from the provider that looks like a
+ * key problem. The size cap is what stops a phone photo from becoming a
+ * multi-megabyte line in a chat file that is read on every launch.
+ */
+function normaliseImages(list) {
+  if (!Array.isArray(list)) return [];
+
+  const images = [];
+  for (const entry of list.slice(0, MAX_IMAGES_PER_MESSAGE)) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    const mime = String(entry.mime || '').toLowerCase().trim();
+    if (!IMAGE_TYPES.has(mime)) continue;
+
+    // Accept a full data: URL too — that is what a paste or a drag-drop gives
+    // the renderer, and stripping it there and here costs nothing.
+    const data = String(entry.data || '').replace(/^data:[^,]*,/, '').trim();
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) continue;
+    if (Buffer.byteLength(data, 'utf8') * 0.75 > MAX_IMAGE_BYTES) continue;
+
+    images.push({ mime, data, ...(entry.name ? { name: String(entry.name).slice(0, 120) } : {}) });
+  }
+  return images;
+}
+
 async function handleChat(req, res) {
   const body = await readBody(req);
   const incoming = Array.isArray(body.messages) ? body.messages : null;
@@ -888,11 +985,17 @@ async function handleChat(req, res) {
   const conversation = history.resolve(body.sessionId);
 
   let added = 0;
+  let sentImages = 0;
   for (const message of incoming) {
-    if (!message || typeof message.content !== 'string' || !message.content.trim()) continue;
+    const images = normaliseImages(message && message.images);
+    const text = message && typeof message.content === 'string' ? message.content : '';
+    // A picture on its own is a perfectly good message — "what is this?" is
+    // implied — so blankness is only disqualifying when nothing came with it.
+    if (!text.trim() && !images.length) continue;
     const role = message.role === 'assistant' ? 'assistant' : 'user';
-    history.append(conversation, role, message.content.slice(0, 8000));
+    history.append(conversation, role, text.slice(0, 8000), images);
     added += 1;
+    sentImages += images.length;
   }
 
   // Every message was blank. This is what a transcription of silence looks like
@@ -902,19 +1005,51 @@ async function handleChat(req, res) {
     return sendJson(res, 400, { error: 'There was nothing to reply to.', empty: true });
   }
 
+  // Refuse before spending anything. The alternative is sending a picture to a
+  // text-only model, which answers plausibly about an image it never received —
+  // the single most confusing way this could fail.
+  if (sentImages && !providers.canSeeImages(settings)) {
+    return sendJson(res, 400, {
+      error:
+        `${settings.identity.name}'s built-in model reads text only, so it cannot look at pictures. ` +
+        'Switch Brain to a cloud provider, or to an Ollama vision model, and it will see them.',
+      cannotSee: true,
+    });
+  }
+
   // Asked by voice, this answer is going to be read out — keep it to a sentence
   // or two rather than making the user listen to a wall of text.
   const spoken = body.voice === true;
 
-  // The model only ever sees the tail of the conversation, however long it gets.
-  const context = conversation.messages.slice(-CONTEXT_MESSAGES).map(({ role, content }) => ({ role, content }));
-  const basePrompt = spoken ? SYSTEM_PROMPT_VOICE : SYSTEM_PROMPT;
+  /**
+   * The model only ever sees the tail of the conversation, however long it gets.
+   *
+   * Pictures ride along on the turn they arrived with, but only for providers
+   * that can use them — carrying them to a text-only provider would put a stray
+   * `images` key on a payload that has no idea what to do with it.
+   */
+  const seeing = providers.canSeeImages(settings);
+  const context = conversation.messages.slice(-CONTEXT_MESSAGES).map(({ role, content, images }) => {
+    // Pictures whose data has been aged out (see forgetOldPictures) keep their
+    // place in the transcript but have nothing left to send.
+    const usable = seeing && Array.isArray(images) ? images.filter((image) => image.data) : [];
+    return { role, content, ...(usable.length ? { images: usable } : {}) };
+  });
+  const name = settings.identity.name;
+  const basePrompt = spoken ? systemPromptVoice(name) : systemPrompt(name);
 
   // Only hand over the action instructions when the last thing said looks like a
   // request to do something — see looksLikeRequest for why carrying them on every
   // turn makes a small model markedly worse at ordinary conversation.
   const lastSaid = [...conversation.messages].reverse().find((message) => message.role === 'user');
-  const permissions = { allowFiles: settings.allowFiles, fileRoots: settings.fileRoots };
+  const roots = filesStore.scopedRoots(settings);
+  const permissions = {
+    allowFiles: settings.allowFiles,
+    fileRoots: settings.fileRoots,
+    fileScope: settings.fileScope,
+    readRoots: roots.read,
+    writeRoots: roots.write,
+  };
   const wantsAction =
     settings.allowActions &&
     (alwaysOffersActions(settings) || actions.looksLikeRequest(lastSaid && lastSaid.content, permissions));
@@ -1430,7 +1565,18 @@ function start(options = {}) {
   });
 }
 
-module.exports = { start, readConfig, readSettings, isConfigured, activeModelId, configPath, AUTH_TOKEN };
+module.exports = {
+  start,
+  readConfig,
+  readSettings,
+  isConfigured,
+  activeModelId,
+  configPath,
+  // Exported so the picture validation can be exercised on its own; it is the
+  // gate between whatever the renderer sent and somebody else's API.
+  normaliseImages,
+  AUTH_TOKEN,
+};
 
 // Standalone: `npm run server`.
 if (require.main === module) {

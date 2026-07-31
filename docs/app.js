@@ -16,7 +16,6 @@ const API_LATEST = `https://api.github.com/repos/${OWNER}/${REPO}/releases/lates
 (function wireLinks() {
   const links = {
     'hero-download': '#download',
-    'hero-source': REPO_URL,
     'footer-repo': REPO_URL,
     'all-releases': RELEASES_LATEST,
   };

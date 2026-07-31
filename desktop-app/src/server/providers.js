@@ -33,6 +33,29 @@ const TTS_PROVIDERS = ['kokoro', 'system', 'cloud', 'z-ai'];
 // typing works exactly the same, and the mic and wake word simply stay dark.
 const ASR_PROVIDERS = ['local', 'whisper', 'cloud', 'z-ai', 'off'];
 
+/**
+ * How big the orb is, in the two numbers that have to agree.
+ *
+ * `visual` is the circle you see; `window` is the transparent Electron window it
+ * is centred in. The window is deliberately twice the circle, because a
+ * transparent window cannot paint outside itself and the glow — a blurred disc
+ * 1.5× the circle wide, spreading another ~0.17× in each direction as it blurs —
+ * would otherwise be clipped into a square. See main.js and the orb rules in
+ * styles.css, both of which derive their sizes from these.
+ */
+const ORB_SIZES = {
+  small: { visual: 48, window: 96, label: 'Small' },
+  medium: { visual: 64, window: 128, label: 'Medium' },
+  large: { visual: 88, window: 176, label: 'Large' },
+};
+
+const THEMES = ['dark', 'light', 'system'];
+
+/** The rose in the middle of the original amber → rose → fuchsia orb. */
+const DEFAULT_ACCENT = '#f43f5e';
+const DEFAULT_NAME = 'Buddy';
+const DEFAULT_WAKE_WORD = 'Hey Buddy';
+
 // Everything defaults to this machine: Buddy's own model, its own voice, and its
 // own ears. Nothing to configure and nothing leaves the device.
 const DEFAULTS = {
@@ -54,6 +77,19 @@ const DEFAULTS = {
     cloudProvider: '',
     cloudModel: '',
   },
+  /**
+   * What Buddy looks like. The accent is a single colour the user picks; the
+   * three-stop gradient of the orb is derived from it in the renderer rather
+   * than being three separate settings nobody would want to tune by hand.
+   */
+  look: { theme: 'dark', accent: DEFAULT_ACCENT, orbSize: 'medium' },
+  /**
+   * What Buddy is called, and what it answers to. Two settings rather than one:
+   * calling it "Ada" while still saying "Hey Buddy" out loud is a perfectly
+   * reasonable thing to want, and a wake phrase has to survive being transcribed
+   * by Whisper, which not every good name does.
+   */
+  identity: { name: DEFAULT_NAME, wakeWord: DEFAULT_WAKE_WORD },
   saveHistory: true,
   /**
    * Whether typed replies are read out loud in the panel. A real setting rather
@@ -68,7 +104,19 @@ const DEFAULTS = {
   // *and* at least one folder named. On its own the switch grants nothing.
   allowFiles: false,
   fileRoots: [],
+  /**
+   * How far Buddy may look.
+   *
+   * 'folders'    — only the folders named in fileRoots, which is the old
+   *                behaviour and stays the default.
+   * 'everywhere' — read and list anything on this machine. Writing is *not*
+   *                widened by this; it stays inside fileRoots either way. See
+   *                scopedRoots in files.js for why those are separate.
+   */
+  fileScope: 'folders',
 };
+
+const FILE_SCOPES = ['folders', 'everywhere'];
 
 /** Bumped whenever defaults change in a way an existing install should inherit. */
 const SETTINGS_VERSION = 2;
@@ -102,6 +150,53 @@ function migrateSettings(raw) {
   return { ...input, tts, asr, version: SETTINGS_VERSION };
 }
 
+/**
+ * A colour Buddy is willing to paint with: #rgb or #rrggbb, in any case, with
+ * or without the hash. Everything else falls back rather than throwing, because
+ * this value ends up interpolated straight into CSS.
+ */
+function normaliseHex(value, fallback) {
+  const text = String(value == null ? '' : value).trim();
+  const short = /^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(text);
+  if (short) {
+    const [, r, g, b] = short;
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  const long = /^#?([0-9a-f]{6})$/i.exec(text);
+  return long ? `#${long[1].toLowerCase()}` : fallback;
+}
+
+/**
+ * Buddy's name is drawn into the panel header, handed to the model as part of
+ * its system prompt, and used in a dozen bits of copy, so it is stripped back to
+ * printable characters on a single line and capped at a length the header can
+ * actually fit.
+ */
+function normaliseName(value, fallback) {
+  const text = String(value == null ? '' : value)
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 24);
+  return text || fallback;
+}
+
+/**
+ * The wake phrase is only ever compared against a Whisper transcript, and that
+ * transcript has already had its punctuation stripped and its case flattened by
+ * the time the comparison happens. So anything that cannot survive that trip —
+ * emoji, punctuation, symbols — is dropped here rather than quietly never
+ * matching. Letters, digits, spaces, apostrophes and hyphens are what is left.
+ */
+function normaliseWakeWord(value, fallback) {
+  const text = String(value == null ? '' : value)
+    .replace(/[^\p{L}\p{N}' -]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 32);
+  return text || fallback;
+}
+
 /** Coerce whatever is on disk into a complete, valid settings object. */
 function normaliseSettings(raw) {
   const input = raw && typeof raw === 'object' ? raw : {};
@@ -114,6 +209,8 @@ function normaliseSettings(raw) {
   const chat = input.chat || {};
   const tts = input.tts || {};
   const asr = input.asr || {};
+  const look = input.look || {};
+  const identity = input.identity || {};
 
   return {
     version: SETTINGS_VERSION,
@@ -141,12 +238,22 @@ function normaliseSettings(raw) {
       cloudProvider: text(asr.cloudProvider, DEFAULTS.asr.cloudProvider),
       cloudModel: text(asr.cloudModel, DEFAULTS.asr.cloudModel),
     },
+    look: {
+      theme: pick(look.theme, THEMES, DEFAULTS.look.theme),
+      accent: normaliseHex(look.accent, DEFAULTS.look.accent),
+      orbSize: pick(look.orbSize, Object.keys(ORB_SIZES), DEFAULTS.look.orbSize),
+    },
+    identity: {
+      name: normaliseName(identity.name, DEFAULTS.identity.name),
+      wakeWord: normaliseWakeWord(identity.wakeWord, DEFAULTS.identity.wakeWord),
+    },
     saveHistory: input.saveHistory !== false,
     speakReplies: input.speakReplies !== false,
     // Default to false rather than true: these have to be asked for.
     allowActions: input.allowActions === true,
     allowFiles: input.allowFiles === true,
     fileRoots: files.normaliseRoots(input.fileRoots),
+    fileScope: pick(input.fileScope, FILE_SCOPES, DEFAULTS.fileScope),
   };
 }
 
@@ -176,6 +283,22 @@ function usesLocalHearing(settings) {
 /** True when chat is answered by the model living inside the app. */
 function usesBuiltinModel(settings) {
   return settings.chat.provider === 'builtin';
+}
+
+/**
+ * Can whatever is answering right now look at a picture?
+ *
+ * This is "worth attempting", not "guaranteed" — whether a cloud or Ollama model
+ * has eyes depends on the model, and keeping a whitelist of model names here
+ * would be wrong within a month. What it does rule out is the case that can
+ * never work: the built-in llama.cpp path, which runs text-only GGUFs and has
+ * no image encoder at all, and the bundled z-ai SDK path, which only sends text.
+ *
+ * Being definite about the "no" is the part that matters. Offering a paperclip
+ * that silently does nothing is the failure worth avoiding.
+ */
+function canSeeImages(settings) {
+  return settings.chat.provider === 'cloud' || settings.chat.provider === 'ollama';
 }
 
 /** Which capabilities still reach the cloud — used for honest in-app copy. */
@@ -224,7 +347,15 @@ async function postJson(url, body, timeoutMs = REQUEST_TIMEOUT_MS) {
 async function ollamaChat({ baseUrl, model, messages }) {
   const payload = await postJson(`${baseUrl}/api/chat`, {
     model: model || OLLAMA_DEFAULT_MODEL,
-    messages,
+    // Ollama takes pictures as bare base64 strings alongside the text, which is
+    // its own shape again — see cloud.js for the other two.
+    messages: messages.map((message) => ({
+      role: message.role,
+      content: String(message.content || ''),
+      ...(Array.isArray(message.images) && message.images.length
+        ? { images: message.images.map((image) => image.data) }
+        : {}),
+    })),
     stream: false,
     options: { temperature: 0.7 },
   });
@@ -323,6 +454,7 @@ async function probeProviders(settings) {
 
 module.exports = {
   usesBuiltinModel,
+  canSeeImages,
   usesCloudChat,
   isCloud,
   usesLocalVoice,
@@ -330,8 +462,14 @@ module.exports = {
   CHAT_PROVIDERS,
   TTS_PROVIDERS,
   ASR_PROVIDERS,
+  ORB_SIZES,
+  THEMES,
+  FILE_SCOPES,
   DEFAULTS,
   SETTINGS_VERSION,
+  normaliseHex,
+  normaliseName,
+  normaliseWakeWord,
   OLLAMA_DEFAULT_MODEL,
   migrateSettings,
   normaliseSettings,

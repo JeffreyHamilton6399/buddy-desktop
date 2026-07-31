@@ -30,22 +30,34 @@ const ICON_PATH = path.join(__dirname, '..', 'buddy-icon.png');
 const STATE_FILE = () => path.join(app.getPath('userData'), 'buddy-state.json');
 
 /**
- * The orb is 64px of visible circle, but its glow and its listening pulse reach
- * past that. A window sized to the circle clips them square, which is exactly the
- * "square ring" the orb used to show: a transparent window cannot paint outside
- * itself, so the halo simply stopped at the edge. The window is therefore padded,
- * and everything the renderer draws is sized to fit inside it — see styles.css,
- * which must stay in step with these numbers.
+ * The orb is a circle of visible colour, but its glow and its listening pulse
+ * reach past that. A window sized to the circle clips them square, which is
+ * exactly the "square ring" the orb used to show: a transparent window cannot
+ * paint outside itself, so the halo simply stopped at the edge. The window is
+ * therefore padded to twice the circle, and everything the renderer draws is
+ * sized to fit inside it — see the orb rules in styles.css, which derive every
+ * length from --orb and must stay in step with these numbers.
  *
  * The padding is kept as small as the glow allows, because a transparent window
  * still captures clicks across its whole rectangle. Making the surplus
  * click-through was tried and abandoned: it depends on Electron forwarding mouse
  * move messages, that forwarding proved unreliable here, and its failure mode is
  * an orb that cannot be clicked at all.
+ *
+ * Which of the three sizes is in use is a setting, so these are read through
+ * functions rather than frozen into constants.
  */
-const ORB_VISUAL = 64;
-const ORB_WINDOW = 128;
-const ORB_INSET = (ORB_WINDOW - ORB_VISUAL) / 2;
+const { ORB_SIZES } = require('./server/providers.js');
+
+let orbSizeName = 'medium';
+
+const orbSize = () => ORB_SIZES[orbSizeName] || ORB_SIZES.medium;
+const orbVisual = () => orbSize().visual;
+const orbFrame = () => orbSize().window;
+const orbInset = () => (orbFrame() - orbVisual()) / 2;
+
+/** What this machine calls the place deleted files go, for anything user-facing. */
+const BIN_NAME = process.platform === 'win32' ? 'Recycle Bin' : 'Trash';
 
 const PANEL_WIDTH = 420;
 const PANEL_HEIGHT = 620;
@@ -74,7 +86,7 @@ const recentlyHeard = [];
 
 // ── persisted state ───────────────────────────────────────────────────────
 
-let state = { orb: null, wakeEnabled: true, orbWindowSize: ORB_WINDOW };
+let state = { orb: null, wakeEnabled: true, orbWindowSize: ORB_SIZES.medium.window };
 
 function loadState() {
   try {
@@ -93,16 +105,48 @@ function loadState() {
     /* first run, or unreadable — defaults are fine */
   }
 
-  // A saved position is the window's corner, so growing the window would shift
-  // the visible orb. Move the corner by half the difference to leave the circle
-  // exactly where the user last put it.
-  if (state.orb && state.orbWindowSize !== ORB_WINDOW) {
-    const shift = (ORB_WINDOW - state.orbWindowSize) / 2;
+  wakeEnabled = state.wakeEnabled;
+}
+
+/**
+ * Keep the visible circle where the user put it when the window around it
+ * changes size.
+ *
+ * A saved position is the window's top-left corner, not the orb's, so resizing
+ * without this would drag the circle up and to the left by half the difference —
+ * which from outside looks like the orb wandering off on its own every time you
+ * touch the size setting.
+ */
+function recentreForWindow(nextWindowSize) {
+  if (state.orb && state.orbWindowSize !== nextWindowSize) {
+    const shift = (nextWindowSize - state.orbWindowSize) / 2;
     state.orb = { x: Math.round(state.orb.x - shift), y: Math.round(state.orb.y - shift) };
   }
-  state.orbWindowSize = ORB_WINDOW;
+  state.orbWindowSize = nextWindowSize;
+}
 
-  wakeEnabled = state.wakeEnabled;
+/** Adopt the size chosen in settings, moving and resizing the window to suit. */
+function applyOrbSize(next) {
+  const wanted = ORB_SIZES[next] ? next : 'medium';
+  const changed = wanted !== orbSizeName || state.orbWindowSize !== ORB_SIZES[wanted].window;
+  orbSizeName = wanted;
+
+  recentreForWindow(orbFrame());
+  if (changed) saveState();
+
+  if (orbWindow && !orbWindow.isDestroyed()) {
+    const position = clampToDisplays(state.orb || defaultOrbPosition());
+    orbWindow.setBounds({ x: position.x, y: position.y, width: orbFrame(), height: orbFrame() });
+  }
+}
+
+/** What settings currently say the orb should be. */
+function readOrbSizeSetting() {
+  try {
+    return require('./server/server.js').readSettings().look.orbSize;
+  } catch {
+    return orbSizeName;
+  }
 }
 
 let saveTimer = null;
@@ -249,8 +293,8 @@ function defaultOrbPosition() {
   const { workArea } = screen.getPrimaryDisplay();
   // Offsets are measured to the visible circle, not the padded window.
   return {
-    x: Math.round(workArea.x + workArea.width - ORB_INSET - ORB_VISUAL - 32),
-    y: Math.round(workArea.y + 48 - ORB_INSET),
+    x: Math.round(workArea.x + workArea.width - orbInset() - orbVisual() - 32),
+    y: Math.round(workArea.y + 48 - orbInset()),
   };
 }
 
@@ -260,9 +304,9 @@ function clampToDisplays(position) {
   const fits = displays.some((display) => {
     const a = display.workArea;
     return (
-      position.x + ORB_WINDOW > a.x &&
+      position.x + orbFrame() > a.x &&
       position.x < a.x + a.width &&
-      position.y + ORB_WINDOW > a.y &&
+      position.y + orbFrame() > a.y &&
       position.y < a.y + a.height
     );
   });
@@ -273,8 +317,8 @@ function createOrbWindow() {
   const position = clampToDisplays(state.orb || defaultOrbPosition());
 
   orbWindow = new BrowserWindow({
-    width: ORB_WINDOW,
-    height: ORB_WINDOW,
+    width: orbFrame(),
+    height: orbFrame(),
     x: position.x,
     y: position.y,
     frame: false,
@@ -356,20 +400,20 @@ function positionPanelNearOrb() {
   const anchor =
     orbWindow && !orbWindow.isDestroyed()
       ? orbWindow.getBounds()
-      : { ...defaultOrbPosition(), width: ORB_WINDOW, height: ORB_WINDOW };
+      : { ...defaultOrbPosition(), width: orbFrame(), height: orbFrame() };
   const { workArea } = screen.getDisplayNearestPoint({
-    x: anchor.x + ORB_WINDOW / 2,
-    y: anchor.y + ORB_WINDOW / 2,
+    x: anchor.x + orbFrame() / 2,
+    y: anchor.y + orbFrame() / 2,
   });
 
   let x = Math.round(anchor.x + anchor.width / 2 - PANEL_WIDTH / 2);
   // Measured from the bottom of the visible circle, not of the padded window,
   // or the panel would float an inset's worth too far away.
-  let y = Math.round(anchor.y + ORB_INSET + ORB_VISUAL + 12);
+  let y = Math.round(anchor.y + orbInset() + orbVisual() + 12);
 
   // If there is no room below the orb, sit above it instead.
   if (y + PANEL_HEIGHT > workArea.y + workArea.height) {
-    y = Math.round(anchor.y + ORB_INSET - PANEL_HEIGHT - 12);
+    y = Math.round(anchor.y + orbInset() - PANEL_HEIGHT - 12);
   }
   x = Math.min(Math.max(x, workArea.x + 8), workArea.x + workArea.width - PANEL_WIDTH - 8);
   y = Math.min(Math.max(y, workArea.y + 8), workArea.y + workArea.height - PANEL_HEIGHT - 8);
@@ -439,9 +483,26 @@ function trayImage(size) {
   }
 }
 
+/**
+ * What Buddy is called, and what it answers to.
+ *
+ * The tray is drawn in the main process, so it cannot use the renderer's copy of
+ * these — it reads the same settings file the renderer's /health answer is built
+ * from. Falls back rather than throwing: a tray menu is not worth failing a
+ * launch over.
+ */
+function identity() {
+  try {
+    return require('./server/server.js').readSettings().identity;
+  } catch {
+    return { name: 'Buddy', wakeWord: 'Hey Buddy' };
+  }
+}
+
 function buildTrayMenu() {
+  const { name } = identity();
   return Menu.buildFromTemplate([
-    { label: 'Open Buddy', click: () => showPanel() },
+    { label: `Open ${name}`, click: () => showPanel() },
     {
       label: 'Wake word: ' + (wakeEnabled ? 'On' : 'Off'),
       type: 'checkbox',
@@ -450,7 +511,7 @@ function buildTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Quit Buddy',
+      label: `Quit ${name}`,
       click: () => {
         quitting = true;
         app.quit();
@@ -461,8 +522,9 @@ function buildTrayMenu() {
 
 function refreshTray() {
   if (tray && !tray.isDestroyed()) {
+    const { name, wakeWord } = identity();
     tray.setContextMenu(buildTrayMenu());
-    tray.setToolTip(wakeEnabled ? "Buddy — listening for 'Hey Buddy'" : 'Buddy');
+    tray.setToolTip(wakeEnabled ? `${name} — listening for '${wakeWord}'` : name);
   }
 }
 
@@ -577,6 +639,50 @@ function registerIpc() {
   ipcMain.on('buddy:open-config-folder', () => shell.openPath(app.getPath('userData')));
 
   /**
+   * A picture of what the user is looking at.
+   *
+   * This is only ever reached by the user pressing the button — the model has no
+   * marker that triggers it, deliberately. Something that can photograph your
+   * screen is not something a small language model should be able to decide to
+   * do; the click is the consent, and the shot is then shown in the transcript
+   * so what was captured is never a mystery.
+   *
+   * The panel and the orb are hidden for the shot. Otherwise the most prominent
+   * thing in the picture is Buddy's own window sitting over the answer.
+   */
+  ipcMain.handle('buddy:capture-screen', async () => {
+    const { desktopCapturer } = require('electron');
+    const wasVisible = Boolean(panelWindow && !panelWindow.isDestroyed() && panelWindow.isVisible());
+
+    try {
+      if (wasVisible) panelWindow.hide();
+      if (orbWindow && !orbWindow.isDestroyed()) orbWindow.hide();
+      // One frame for the compositor to actually take them down.
+      await new Promise((resolve) => setTimeout(resolve, 180));
+
+      const { workAreaSize, scaleFactor } = screen.getPrimaryDisplay();
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: {
+          width: Math.round(workAreaSize.width * Math.min(scaleFactor, 2)),
+          height: Math.round(workAreaSize.height * Math.min(scaleFactor, 2)),
+        },
+      });
+
+      if (!sources.length) return { ok: false, error: 'No screen could be captured.' };
+      const image = sources[0].thumbnail;
+      if (image.isEmpty()) return { ok: false, error: 'The screen came back blank.' };
+
+      return { ok: true, mime: 'image/png', data: image.toPNG().toString('base64'), name: 'screen.png' };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    } finally {
+      if (orbWindow && !orbWindow.isDestroyed()) orbWindow.showInactive();
+      if (wasVisible && panelWindow && !panelWindow.isDestroyed()) panelWindow.show();
+    }
+  });
+
+  /**
    * Share a folder with Buddy.
    *
    * Deliberately a native picker rather than a text box: the user chooses a
@@ -613,13 +719,28 @@ function registerIpc() {
      * This handler is reachable by anything that can put a message on the wire,
      * so it cannot take the renderer's word for where a file may be written.
      */
-    if (name === 'read_file' || name === 'write_file' || name === 'append_file' || name === 'list_folder') {
+    if (
+      name === 'read_file' ||
+      name === 'write_file' ||
+      name === 'append_file' ||
+      name === 'list_folder' ||
+      name === 'delete_file'
+    ) {
       const files = require('./server/files.js');
       const { readSettings } = require('./server/server.js');
       const settings = readSettings();
 
       if (!settings.allowFiles) return { ok: false, error: 'Buddy is not allowed to touch files.' };
-      const found = files.resolveWithin(settings.fileRoots, value);
+
+      /**
+       * Reading and writing are checked against different root sets, and the
+       * split is decided here rather than taken from the message: a caller that
+       * could name its own scope could turn a read permission into a write one
+       * just by saying so.
+       */
+      const roots = files.scopedRoots(settings);
+      const reading = name === 'read_file' || name === 'list_folder';
+      const found = files.resolveWithin(reading ? roots.read : roots.write, value);
       if (!found.ok) return { ok: false, error: found.error };
 
       try {
@@ -632,6 +753,27 @@ function registerIpc() {
           if (!result.ok) return { ok: false, error: result.error };
           const listing = result.entries.length ? result.entries.join('\n') : '(empty)';
           return { ok: true, detail: result.truncated ? `${listing}\n…and more` : listing };
+        }
+
+        /**
+         * Deleting goes to the Recycle Bin, never to unlink().
+         *
+         * This is the same bargain the .bak files make for overwrites: Buddy
+         * may do what it was asked without the user having to be certain the
+         * model understood, because the mistake is undoable by hand in a place
+         * they already know about. shell.trashItem is what makes that true, so
+         * a failure to trash is a refusal to delete rather than a reason to
+         * fall back on removing the file outright.
+         */
+        if (name === 'delete_file') {
+          const check = await files.checkDeletable(found.path);
+          if (!check.ok) return { ok: false, error: check.error };
+          try {
+            await shell.trashItem(found.path);
+          } catch (error) {
+            return { ok: false, error: `it could not be moved to the ${BIN_NAME} (${error.message})` };
+          }
+          return { ok: true, detail: `It is in the ${BIN_NAME} if you want it back.` };
         }
 
         const content = typeof action.content === 'string' ? action.content : '';
@@ -677,6 +819,11 @@ function registerIpc() {
   });
 
   ipcMain.on('buddy:runtime-changed', () => {
+    // The orb's window is owned here, not by the renderer, so a change to its
+    // size has to be picked up on this side too — the renderer can only resize
+    // what it draws, not the hole it draws into.
+    applyOrbSize(readOrbSizeSetting());
+    refreshTray();
     eachRenderer((window) => window.webContents.send('buddy:runtime-changed'));
   });
 
@@ -740,6 +887,7 @@ function registerIpc() {
       window.close();
     }
     if (!orbWindow) {
+      applyOrbSize(readOrbSizeSetting());
       createOrbWindow();
       createPanelWindow();
       createTray();
@@ -813,6 +961,7 @@ if (!app.requestSingleInstanceLock()) {
         // The panel starts hidden, so first-run setup needs a window of its own.
         createSetupWindow();
       } else {
+        applyOrbSize(readOrbSizeSetting());
         createOrbWindow();
         createPanelWindow();
         createTray();

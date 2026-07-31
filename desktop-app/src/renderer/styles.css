@@ -1,23 +1,140 @@
-/* Buddy — warm dark theme. Amber → rose → fuchsia only; no blue, no indigo. */
-
+/*
+ * Buddy's colours, all of them, in one place.
+ *
+ * Nothing below this block names a colour literally, because two things move at
+ * runtime. The accent is whatever the user picked — theme.js writes the three
+ * component triples the orb's gradient is built from — and the whole palette
+ * swaps when the theme does. Everything else is expressed as an alpha of one of
+ * these triples, so both of those changes reach it for free.
+ *
+ * theme.js is the only code allowed to set any of these.
+ */
 :root {
+  /*
+   * The accent, warm by default: amber → rose → fuchsia. Held as component
+   * triples rather than as colours so `rgba(var(--rose-rgb), 0.4)` works, which
+   * is most of what the stylesheet actually asks for.
+   */
+  --amber-rgb: 251, 191, 36;
+  --rose-rgb: 244, 63, 94;
+  --fuchsia-rgb: 217, 70, 239;
+  --amber: rgb(var(--amber-rgb));
+  --rose: rgb(var(--rose-rgb));
+  --fuchsia: rgb(var(--fuchsia-rgb));
+  --warm-grad: linear-gradient(135deg, var(--amber), var(--rose) 55%, var(--fuchsia));
+
+  /*
+   * Signals, which the accent must never reach. Green means Buddy is listening;
+   * red means destructive or failed. Recolouring the orb green cannot be allowed
+   * to turn "Delete all saved chats" green along with it.
+   */
+  --emerald-rgb: 52, 211, 153;
+  --emerald: rgb(var(--emerald-rgb));
+  --danger-rgb: 244, 63, 94;
+  --danger: rgb(var(--danger-rgb));
+
+  /* surfaces */
   --ink: #0b0b0f;
   --surface: rgba(22, 18, 24, 0.92);
   --surface-solid: #16121a;
-  --edge: rgba(255, 214, 170, 0.14);
+  --float-rgb: 14, 11, 16;
+  --chrome-top-rgb: 18, 14, 20;
+  --chrome-foot-rgb: 13, 10, 15;
+  --edge-rgb: 255, 214, 170;
+  --edge: rgba(var(--edge-rgb), 0.14);
+  /* An overlay that lifts a surface out of its background… */
+  --raise-rgb: 255, 255, 255;
+  /* …and one that presses a field into it. */
+  --sunken-rgb: 0, 0, 0;
+  /*
+   * The highlight on the orb itself, which is a different thing entirely and is
+   * why it is not --raise-rgb. That one flips to black under the light theme so
+   * it can darken a pale surface; this one is a light source catching a coloured
+   * sphere, and a light source is white under both themes. Flipping it turned
+   * the shine on the orb into a black smudge — and the orb floats over the
+   * desktop, not over any surface of Buddy's, so the theme has no business
+   * reaching it at all.
+   */
+  --gloss-rgb: 255, 255, 255;
+  --shadow-rgb: 0, 0, 0;
+  --track: #4a4048;
+
+  /* text, brightest to faintest */
   --text: #f6ecec;
   --muted: #b09ea6;
-  --amber: #fbbf24;
-  --rose: #f43f5e;
-  --fuchsia: #d946ef;
-  --emerald: #34d399;
-  --warm-grad: linear-gradient(135deg, var(--amber), var(--rose) 55%, var(--fuchsia));
+  --dim-1: #cbb6bd;
+  --dim-2: #8a7880;
+  --dim-3: #7d6c74;
+  --dim-4: #6f6068;
+  --tone-rose: #ffc9d2;
+  --tone-rose-strong: #ff8fa3;
+  --tone-amber: #ffd9a8;
+  --tone-emerald: #9ff0d0;
+  /* Text sitting on the accent gradient, which is bright under either theme. */
+  --on-accent: #2a0d14;
+
   --radius: 16px;
   --font: "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", Arial, sans-serif;
+
+  /*
+   * The visible orb. Every dimension in the orb window is a multiple of this, so
+   * changing it in settings resizes the whole thing coherently — see ORB_SIZES
+   * in server/providers.js, which holds the matching Electron window sizes.
+   */
+  --orb: 64px;
+}
+
+/*
+ * The light theme.
+ *
+ * Not an inversion. The accent gradient is vivid enough to stand on white, so
+ * what changes is everything behind and around it — and the white overlays that
+ * lifted a surface out of the dark now have to darken it instead, which is the
+ * whole job of --raise-rgb flipping to black. The shine on the orb is not one of
+ * those overlays and stays white — see --gloss-rgb above.
+ *
+ * "Match my system" is resolved in theme.js rather than by a media query here,
+ * so there is one light palette rather than two copies of it.
+ */
+:root[data-theme="light"] {
+  --ink: #f6f2f4;
+  --surface: rgba(255, 253, 254, 0.94);
+  --surface-solid: #fffdfe;
+  --float-rgb: 255, 253, 254;
+  --chrome-top-rgb: 253, 250, 252;
+  --chrome-foot-rgb: 246, 241, 244;
+  --edge-rgb: 92, 54, 32;
+  --edge: rgba(var(--edge-rgb), 0.16);
+  --raise-rgb: 0, 0, 0;
+  --sunken-rgb: 190, 172, 182;
+  --shadow-rgb: 150, 128, 140;
+  --track: #ded6da;
+
+  --text: #1b1317;
+  --muted: #6b5a62;
+  --dim-1: #574a50;
+  --dim-2: #6b5c63;
+  --dim-3: #7a6a71;
+  --dim-4: #857680;
+  --tone-rose: #9f1239;
+  --tone-rose-strong: #be123c;
+  --tone-amber: #92400e;
+  --tone-emerald: #047857;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/*
+ * The UA rule for [hidden] is `display: none` at the lowest possible weight, so
+ * any author rule that sets `display` at all outranks it — and almost every
+ * component here sets one. The result is an element with `hidden` on it that is
+ * still perfectly visible, which had already been patched component by component
+ * seven times over before this rule replaced the lot of them.
+ */
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -39,9 +156,6 @@ body.flat {
   background: var(--ink);
 }
 
-.root[hidden] {
-  display: none !important;
-}
 
 .root {
   height: 100%;
@@ -77,33 +191,34 @@ body[data-mode="orb"].flat {
 }
 
 /*
- * The window is 128px but the orb is 64px, and the gap is deliberate: sized to
- * the circle, every halo got cut off square, because a transparent window cannot
- * paint outside itself — that was the "square ring" this used to show.
+ * The window is twice the orb, and the gap is deliberate: sized to the circle,
+ * every halo got cut off square, because a transparent window cannot paint
+ * outside itself — that was the "square ring" this used to show.
  *
- * So nothing here may exceed 128px at any point in any animation, and a blur
- * counts: `filter: blur(11px)` spreads roughly that far past the element's own
- * box, so the glow below is sized 96 + 2*11 = 118. ORB_WINDOW in main.js is the
- * other half of this contract.
+ * So nothing here may exceed 2 × --orb at any point in any animation, and a blur
+ * counts: the blur below spreads roughly its own radius past the element's box,
+ * so the glow works out at 1.5 + 2 × 0.172 = 1.844 orbs across. ORB_SIZES in
+ * server/providers.js is the other half of this contract, and every length here
+ * is a multiple of --orb so that contract holds at all three sizes.
  */
 .orb-stage {
   position: relative;
-  width: 128px;
-  height: 128px;
+  width: calc(var(--orb) * 2);
+  height: calc(var(--orb) * 2);
   display: grid;
   place-items: center;
 }
 
 .orb {
   position: relative;
-  width: 64px;
-  height: 64px;
+  width: var(--orb);
+  height: var(--orb);
   padding: 0;
   border-radius: 50%;
   background: radial-gradient(circle at 34% 30%, var(--amber), var(--rose) 52%, var(--fuchsia) 100%);
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.16) inset,
-    0 6px 18px rgba(244, 63, 94, 0.35);
+    0 0 0 1px rgba(var(--gloss-rgb), 0.16) inset,
+    0 6px 18px rgba(var(--rose-rgb), 0.35);
   transition: transform 160ms ease;
   -webkit-app-region: no-drag;
   z-index: 2;
@@ -116,11 +231,11 @@ body[data-mode="orb"].flat {
  */
 .orb-glow {
   position: absolute;
-  width: 96px;
-  height: 96px;
+  width: calc(var(--orb) * 1.5);
+  height: calc(var(--orb) * 1.5);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(244, 63, 94, 0.5), rgba(217, 70, 239, 0.24) 55%, transparent 72%);
-  filter: blur(11px);
+  background: radial-gradient(circle, rgba(var(--rose-rgb), 0.5), rgba(var(--fuchsia-rgb), 0.24) 55%, transparent 72%);
+  filter: blur(calc(var(--orb) * 0.172));
   animation: breathe 4.2s ease-in-out infinite;
   pointer-events: none;
 }
@@ -129,9 +244,9 @@ body[data-mode="orb"].flat {
 body.flat .orb-stage::before {
   content: "";
   position: absolute;
-  width: 96px;
-  height: 96px;
-  border-radius: 24px;
+  width: calc(var(--orb) * 1.5);
+  height: calc(var(--orb) * 1.5);
+  border-radius: calc(var(--orb) * 0.375);
   background: var(--surface-solid);
   border: 1px solid var(--edge);
 }
@@ -145,16 +260,16 @@ body.flat .orb-stage::before {
 
 .orb-core {
   inset: 0;
-  background: radial-gradient(circle at 50% 120%, rgba(217, 70, 239, 0.55), transparent 62%);
+  background: radial-gradient(circle at 50% 120%, rgba(var(--fuchsia-rgb), 0.55), transparent 62%);
 }
 
 .orb-sheen {
-  top: 9px;
-  left: 13px;
-  width: 20px;
-  height: 14px;
-  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.75), transparent 70%);
-  filter: blur(1px);
+  top: calc(var(--orb) * 0.14);
+  left: calc(var(--orb) * 0.203);
+  width: calc(var(--orb) * 0.3125);
+  height: calc(var(--orb) * 0.219);
+  background: radial-gradient(ellipse at center, rgba(var(--gloss-rgb), 0.75), transparent 70%);
+  filter: blur(calc(var(--orb) * 0.016));
 }
 
 .orb:hover {
@@ -174,8 +289,8 @@ body.flat .orb-stage::before {
 /* Emerald ring = the mic is hot. */
 .orb-ring {
   position: absolute;
-  width: 72px;
-  height: 72px;
+  width: calc(var(--orb) * 1.125);
+  height: calc(var(--orb) * 1.125);
   border-radius: 50%;
   border: 2px solid transparent;
   opacity: 0;
@@ -199,15 +314,16 @@ body.flat .orb-stage::before {
 }
 
 /*
- * The expanding ripple. Scaled from a fixed 72px rather than grown with
- * box-shadow so the largest frame still fits inside the stage.
+ * The expanding ripple. Scaled from 1.125 orbs rather than grown with box-shadow
+ * so the largest frame still fits inside the stage: 1.125 × 1.7 = 1.9125, just
+ * inside the two orbs the stage is wide.
  */
 .orb-ripple {
   position: absolute;
-  width: 72px;
-  height: 72px;
+  width: calc(var(--orb) * 1.125);
+  height: calc(var(--orb) * 1.125);
   border-radius: 50%;
-  border: 2px solid rgba(52, 211, 153, 0.5);
+  border: 2px solid rgba(var(--emerald-rgb), 0.5);
   opacity: 0;
   pointer-events: none;
   z-index: 1;
@@ -231,13 +347,13 @@ body.flat .orb-stage::before {
 .orb-stage.asking .orb-ring {
   opacity: 1;
   border-width: 3px;
-  border-color: rgba(52, 211, 153, 1);
-  box-shadow: 0 0 14px rgba(52, 211, 153, 0.5);
+  border-color: rgba(var(--emerald-rgb), 1);
+  box-shadow: 0 0 14px rgba(var(--emerald-rgb), 0.5);
 }
 
 .orb-stage.asking .orb-ripple {
   animation: ripple 1.5s ease-out infinite;
-  border-color: rgba(52, 211, 153, 0.8);
+  border-color: rgba(var(--emerald-rgb), 0.8);
 }
 
 .orb-stage.asking .orb-dot,
@@ -249,7 +365,7 @@ body.flat .orb-stage::before {
 /* Thinking: the ring holds steady and the orb breathes rather than pulsing. */
 .orb-stage.thinking .orb-ring {
   opacity: 1;
-  border-color: rgba(52, 211, 153, 0.35);
+  border-color: rgba(var(--emerald-rgb), 0.35);
 }
 
 .orb-stage.thinking .orb {
@@ -308,13 +424,13 @@ body.flat .orb-stage::before {
 .orb-dot {
   position: absolute;
   /* Placed against the circle, not the padded window. */
-  right: calc(50% - 32px + 2px);
-  bottom: calc(50% - 32px + 2px);
-  width: 9px;
-  height: 9px;
+  right: calc(50% - var(--orb) / 2 + 2px);
+  bottom: calc(50% - var(--orb) / 2 + 2px);
+  width: calc(var(--orb) * 0.14);
+  height: calc(var(--orb) * 0.14);
   border-radius: 50%;
   background: var(--emerald);
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.9);
+  box-shadow: 0 0 8px rgba(var(--emerald-rgb), 0.9);
   opacity: 0;
   transform: scale(0.4);
   transition: opacity 200ms ease, transform 200ms ease;
@@ -361,12 +477,12 @@ body.flat .orb-stage::before {
 .orb-tooltip {
   position: absolute;
   /* Just above the circle, which sits centred inside a much larger stage. */
-  top: calc(50% - 32px - 26px);
+  top: calc(50% - var(--orb) / 2 - 26px);
   left: 50%;
   transform: translateX(-50%) translateY(4px);
   padding: 3px 8px;
   border-radius: 8px;
-  background: rgba(14, 11, 16, 0.94);
+  background: rgba(var(--float-rgb), 0.94);
   border: 1px solid var(--edge);
   color: var(--text);
   font-size: 10px;
@@ -383,13 +499,13 @@ body.flat .orb-stage::before {
 
 .orb-toast {
   position: absolute;
-  bottom: calc(50% - 32px - 22px);
+  bottom: calc(50% - var(--orb) / 2 - 22px);
   left: 50%;
   transform: translateX(-50%);
   max-width: 140px;
   padding: 2px 7px;
   border-radius: 7px;
-  background: rgba(14, 11, 16, 0.95);
+  background: rgba(var(--float-rgb), 0.95);
   border: 1px solid var(--edge);
   font-size: 9px;
   line-height: 1.35;
@@ -406,8 +522,8 @@ body.flat .orb-stage::before {
 }
 
 .orb-toast.bad {
-  border-color: rgba(244, 63, 94, 0.6);
-  color: #ffc9d2;
+  border-color: rgba(var(--danger-rgb), 0.6);
+  color: var(--tone-rose);
 }
 
 /*
@@ -512,12 +628,14 @@ body.flat .orb-stage::before {
   border-radius: var(--radius);
   border: 1px solid var(--edge);
   background:
-    radial-gradient(120% 80% at 8% -10%, rgba(244, 63, 94, 0.16), transparent 60%),
-    radial-gradient(100% 70% at 100% 0%, rgba(217, 70, 239, 0.14), transparent 55%),
+    radial-gradient(120% 80% at 8% -10%, rgba(var(--rose-rgb), 0.16), transparent 60%),
+    radial-gradient(100% 70% at 100% 0%, rgba(var(--fuchsia-rgb), 0.14), transparent 55%),
     var(--surface);
   backdrop-filter: blur(22px);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 22px 60px rgba(var(--shadow-rgb), 0.55);
   overflow: hidden;
+  /* The drop-target cue is an ::after covering the whole panel. */
+  position: relative;
 }
 
 body.flat .panel {
@@ -530,7 +648,7 @@ body.flat .panel {
   align-items: center;
   gap: 10px;
   padding: 12px 12px 10px;
-  border-bottom: 1px solid rgba(255, 214, 170, 0.09);
+  border-bottom: 1px solid rgba(var(--edge-rgb), 0.09);
   -webkit-app-region: drag;
 }
 
@@ -554,13 +672,13 @@ body.flat .panel {
 }
 
 .panel-identity:hover {
-  background: rgba(255, 214, 170, 0.09);
+  background: rgba(var(--edge-rgb), 0.09);
 }
 
 .identity-chevron {
   width: 14px;
   height: 14px;
-  color: #7d6c74;
+  color: var(--dim-3);
   opacity: 0;
   transform: translateX(-3px);
   transition: opacity 150ms ease, transform 150ms ease;
@@ -577,7 +695,7 @@ body.flat .panel {
   height: 26px;
   border-radius: 50%;
   background: radial-gradient(circle at 34% 30%, var(--amber), var(--rose) 55%, var(--fuchsia));
-  box-shadow: 0 0 12px rgba(244, 63, 94, 0.4);
+  box-shadow: 0 0 12px rgba(var(--rose-rgb), 0.4);
 }
 
 .panel-title {
@@ -604,7 +722,7 @@ body.flat .panel {
 }
 
 .panel-status.bad {
-  color: #ff8fa3;
+  color: var(--tone-rose-strong);
 }
 
 .panel-actions {
@@ -624,12 +742,12 @@ body.flat .panel {
 }
 
 .icon-btn:hover {
-  background: rgba(255, 214, 170, 0.1);
+  background: rgba(var(--edge-rgb), 0.1);
   color: var(--text);
 }
 
 .icon-btn[aria-pressed="false"] {
-  color: #6f6068;
+  color: var(--dim-4);
 }
 
 .icon-btn[aria-pressed="false"] .wave {
@@ -645,10 +763,10 @@ body.flat .panel {
 @keyframes rec {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.5);
+    box-shadow: 0 0 0 0 rgba(var(--rose-rgb), 0.5);
   }
   60% {
-    box-shadow: 0 0 0 8px rgba(244, 63, 94, 0);
+    box-shadow: 0 0 0 8px rgba(var(--rose-rgb), 0);
   }
 }
 
@@ -669,13 +787,10 @@ body.flat .panel {
   z-index: 5;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, rgba(18, 14, 20, 0.98), rgba(14, 11, 16, 0.99));
+  background: linear-gradient(180deg, rgba(var(--chrome-top-rgb), 0.98), rgba(var(--float-rgb), 0.99));
   animation: slide-in 200ms ease both;
 }
 
-.drawer[hidden] {
-  display: none;
-}
 
 @keyframes slide-in {
   from {
@@ -693,7 +808,7 @@ body.flat .panel {
   align-items: center;
   gap: 8px;
   padding: 11px 10px 10px 14px;
-  border-bottom: 1px solid rgba(255, 214, 170, 0.09);
+  border-bottom: 1px solid rgba(var(--edge-rgb), 0.09);
 }
 
 .drawer-head strong {
@@ -712,7 +827,7 @@ body.flat .panel {
   overflow-y: auto;
   padding: 8px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(244, 63, 94, 0.45) transparent;
+  scrollbar-color: rgba(var(--rose-rgb), 0.45) transparent;
 }
 
 .drawer-list::-webkit-scrollbar {
@@ -721,7 +836,7 @@ body.flat .panel {
 
 .drawer-list::-webkit-scrollbar-thumb {
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(244, 63, 94, 0.55), rgba(217, 70, 239, 0.5));
+  background: linear-gradient(180deg, rgba(var(--rose-rgb), 0.55), rgba(var(--fuchsia-rgb), 0.5));
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -735,20 +850,20 @@ body.flat .panel {
   margin-bottom: 5px;
   border-radius: 11px;
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.035);
+  background: rgba(var(--raise-rgb), 0.035);
   text-align: left;
   cursor: pointer;
   transition: background 150ms ease, border-color 150ms ease;
 }
 
 .chat-row:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(244, 63, 94, 0.35);
+  background: rgba(var(--raise-rgb), 0.07);
+  border-color: rgba(var(--rose-rgb), 0.35);
 }
 
 .chat-row.is-current {
-  border-color: rgba(251, 191, 36, 0.5);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(var(--amber-rgb), 0.5);
+  background: rgba(var(--amber-rgb), 0.08);
 }
 
 .chat-row-main {
@@ -782,7 +897,7 @@ body.flat .panel {
   width: 24px;
   height: 24px;
   border-radius: 7px;
-  color: #8a7880;
+  color: var(--dim-2);
   opacity: 0;
   transition: opacity 140ms ease, background 140ms ease, color 140ms ease;
 }
@@ -793,8 +908,8 @@ body.flat .panel {
 }
 
 .chat-row-del:hover {
-  background: rgba(244, 63, 94, 0.2);
-  color: #ffc9d2;
+  background: rgba(var(--rose-rgb), 0.2);
+  color: var(--tone-rose);
 }
 
 .chat-row-del svg {
@@ -836,7 +951,7 @@ body.flat .panel {
   padding: 11px 12px;
   border-radius: 12px;
   border: 1px solid var(--edge);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--raise-rgb), 0.03);
 }
 
 .switch.big input {
@@ -867,20 +982,17 @@ body.flat .panel {
   z-index: 6;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, rgba(18, 14, 20, 0.985), rgba(13, 10, 15, 0.995));
+  background: linear-gradient(180deg, rgba(var(--chrome-top-rgb), 0.985), rgba(var(--chrome-foot-rgb), 0.995));
   animation: slide-in 200ms ease both;
 }
 
-.sheet[hidden] {
-  display: none;
-}
 
 .sheet-head {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 214, 170, 0.09);
+  border-bottom: 1px solid rgba(var(--edge-rgb), 0.09);
 }
 
 .sheet-head strong {
@@ -896,7 +1008,7 @@ body.flat .panel {
 }
 
 .sheet-note.bad {
-  color: #ffc9d2;
+  color: var(--tone-rose);
 }
 
 .sheet-body {
@@ -910,7 +1022,7 @@ body.flat .panel {
   flex: 0 0 auto;
   width: 74px;
   padding: 8px 6px;
-  border-right: 1px solid rgba(255, 214, 170, 0.09);
+  border-right: 1px solid rgba(var(--edge-rgb), 0.09);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -934,13 +1046,13 @@ body.flat .panel {
 }
 
 .rail-tab:hover {
-  background: rgba(255, 214, 170, 0.08);
+  background: rgba(var(--edge-rgb), 0.08);
   color: var(--text);
 }
 
 .rail-tab.is-on {
-  color: #ffd9a8;
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.16), rgba(217, 70, 239, 0.12));
+  color: var(--tone-amber);
+  background: linear-gradient(135deg, rgba(var(--amber-rgb), 0.16), rgba(var(--fuchsia-rgb), 0.12));
 }
 
 .panes {
@@ -949,7 +1061,7 @@ body.flat .panel {
   overflow-y: auto;
   padding: 14px 14px 18px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(244, 63, 94, 0.45) transparent;
+  scrollbar-color: rgba(var(--rose-rgb), 0.45) transparent;
 }
 
 .panes::-webkit-scrollbar {
@@ -958,7 +1070,7 @@ body.flat .panel {
 
 .panes::-webkit-scrollbar-thumb {
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(244, 63, 94, 0.55), rgba(217, 70, 239, 0.5));
+  background: linear-gradient(180deg, rgba(var(--rose-rgb), 0.55), rgba(var(--fuchsia-rgb), 0.5));
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -984,7 +1096,15 @@ body.flat .panel {
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: #cbb6bd;
+  color: var(--dim-1);
+}
+
+/* A subdivision of an h3 section — quieter, and closer to what it labels. */
+.pane h4 {
+  margin: 16px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .pane-lede {
@@ -1001,7 +1121,7 @@ body.flat .panel {
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: #cbb6bd;
+  color: var(--dim-1);
 }
 
 .pane label.switch {
@@ -1018,7 +1138,7 @@ body.flat .panel {
   padding: 0 9px;
   border-radius: 10px;
   border: 1px solid var(--edge);
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(var(--sunken-rgb), 0.34);
   color: var(--text);
   font: inherit;
   font-size: 12px;
@@ -1035,8 +1155,8 @@ body.flat .panel {
 .pane input[type="url"]:focus,
 .pane input[type="password"]:focus {
   outline: none;
-  border-color: rgba(244, 63, 94, 0.6);
-  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+  border-color: rgba(var(--rose-rgb), 0.6);
+  box-shadow: 0 0 0 3px rgba(var(--rose-rgb), 0.14);
 }
 
 .pane input[type="range"] {
@@ -1063,7 +1183,7 @@ body.flat .panel {
   padding: 10px 11px;
   border-radius: 12px;
   border: 1px solid var(--edge);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--raise-rgb), 0.03);
   color: var(--text);
   text-align: left;
   cursor: pointer;
@@ -1071,7 +1191,7 @@ body.flat .panel {
 }
 
 .runs-choice:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(var(--raise-rgb), 0.07);
 }
 
 .runs-choice strong {
@@ -1085,13 +1205,78 @@ body.flat .panel {
 }
 
 .runs-choice.is-on {
-  border-color: rgba(251, 191, 36, 0.5);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(var(--amber-rgb), 0.5);
+  background: rgba(var(--amber-rgb), 0.08);
 }
 
 .runs-choice.is-on strong::after {
   content: " ✓";
   color: var(--amber);
+}
+
+/* ── choosing a colour ────────────────────────────────────────────────── */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/*
+ * Each swatch is the orb it would produce, not a flat square of the accent —
+ * the gradient is most of what the colour actually looks like, so a plain chip
+ * would be promising something different from what you get.
+ */
+.swatch {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--edge);
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.swatch:hover {
+  transform: scale(1.08);
+}
+
+.swatch.is-on {
+  border-color: var(--text);
+  box-shadow: 0 0 0 1px var(--edge), 0 0 10px rgba(var(--rose-rgb), 0.5);
+}
+
+.swatch-own {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.swatch-own input[type="color"] {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
 }
 
 /* ── pasting an API key ───────────────────────────────────────────────── */
@@ -1122,7 +1307,7 @@ body.flat .panel {
   padding: 0 8px;
   border-radius: 9px;
   border: 1px solid var(--edge);
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(var(--sunken-rgb), 0.34);
   color: var(--text);
   font: inherit;
   font-size: 11.5px;
@@ -1131,7 +1316,7 @@ body.flat .panel {
 
 .key-model:focus {
   outline: none;
-  border-color: rgba(244, 63, 94, 0.6);
+  border-color: rgba(var(--rose-rgb), 0.6);
 }
 
 /*
@@ -1147,7 +1332,7 @@ body.flat .panel {
   padding: 0 10px;
   border-radius: 10px;
   border: 1px solid var(--edge);
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(var(--sunken-rgb), 0.34);
   color: var(--text);
   font: inherit;
   font-size: 12px;
@@ -1155,8 +1340,8 @@ body.flat .panel {
 
 .model-search:focus {
   outline: none;
-  border-color: rgba(244, 63, 94, 0.6);
-  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+  border-color: rgba(var(--rose-rgb), 0.6);
+  box-shadow: 0 0 0 3px rgba(var(--rose-rgb), 0.14);
 }
 
 .model-search::-webkit-search-cancel-button {
@@ -1189,15 +1374,15 @@ body.flat .panel {
   padding: 7px 12px;
   border-radius: 10px;
   border: 1px solid var(--edge);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--raise-rgb), 0.05);
   color: var(--text);
   font-size: 11.5px;
   transition: background 140ms ease, border-color 140ms ease;
 }
 
 .btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(244, 63, 94, 0.4);
+  background: rgba(var(--raise-rgb), 0.1);
+  border-color: rgba(var(--rose-rgb), 0.4);
 }
 
 .btn:disabled {
@@ -1208,7 +1393,7 @@ body.flat .panel {
 .btn.primary {
   border-color: transparent;
   background: var(--warm-grad);
-  color: #2a0d14;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -1222,9 +1407,9 @@ body.flat .panel {
 }
 
 .btn.ghost:hover {
-  color: #ffc9d2;
-  border-color: rgba(244, 63, 94, 0.5);
-  background: rgba(244, 63, 94, 0.12);
+  color: var(--tone-rose);
+  border-color: rgba(var(--rose-rgb), 0.5);
+  background: rgba(var(--rose-rgb), 0.12);
 }
 
 /* model cards */
@@ -1239,12 +1424,12 @@ body.flat .panel {
   padding: 11px 12px;
   border-radius: 12px;
   border: 1px solid var(--edge);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--raise-rgb), 0.03);
 }
 
 .card.is-active {
-  border-color: rgba(251, 191, 36, 0.5);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(var(--amber-rgb), 0.5);
+  background: rgba(var(--amber-rgb), 0.08);
 }
 
 .card-head {
@@ -1294,7 +1479,7 @@ body.flat .panel {
 }
 
 .card-note.bad {
-  color: #ffc9d2;
+  color: var(--tone-rose);
 }
 
 .card-foot .bar {
@@ -1305,9 +1490,9 @@ body.flat .panel {
 .badge {
   padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(251, 191, 36, 0.18);
-  border: 1px solid rgba(251, 191, 36, 0.45);
-  color: #ffd9a8;
+  background: rgba(var(--amber-rgb), 0.18);
+  border: 1px solid rgba(var(--amber-rgb), 0.45);
+  color: var(--tone-amber);
   font-size: 10px;
   font-weight: 600;
 }
@@ -1323,7 +1508,7 @@ body.flat .panel {
   align-items: baseline;
   gap: 8px;
   padding: 6px 2px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(var(--raise-rgb), 0.05);
   font-size: 11.5px;
   color: var(--muted);
 }
@@ -1331,7 +1516,7 @@ body.flat .panel {
 .heard-when {
   flex: 0 0 auto;
   font-size: 10px;
-  color: #6f6068;
+  color: var(--dim-4);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1344,7 +1529,7 @@ body.flat .panel {
 .heard-tag {
   flex: 0 0 auto;
   font-size: 10px;
-  color: #6f6068;
+  color: var(--dim-4);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1364,9 +1549,6 @@ body.flat .panel {
   border-top: 1px solid var(--edge);
 }
 
-.probe-list[hidden] {
-  display: none;
-}
 
 .probe-step {
   display: flex;
@@ -1374,7 +1556,7 @@ body.flat .panel {
   gap: 9px;
   flex-wrap: wrap;
   padding: 8px 2px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(var(--raise-rgb), 0.05);
   font-size: 11.5px;
   color: var(--muted);
 }
@@ -1388,7 +1570,7 @@ body.flat .panel {
   min-width: 0;
   font-style: normal;
   font-size: 10.5px;
-  color: var(--dim, #7d6c74);
+  color: var(--dim, var(--dim-3));
   overflow-wrap: anywhere;
 }
 
@@ -1398,7 +1580,7 @@ body.flat .panel {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #4a4048;
+  background: var(--track);
 }
 
 .probe-step.is-run i {
@@ -1419,11 +1601,11 @@ body.flat .panel {
 }
 
 .probe-step.is-fail {
-  color: #ffc9d2;
+  color: var(--tone-rose);
 }
 
 .probe-step.is-fail em {
-  color: #ffc9d2;
+  color: var(--tone-rose);
 }
 
 /* Live input level, so a dead or muted microphone is obvious. */
@@ -1433,7 +1615,7 @@ body.flat .panel {
   height: 5px;
   margin-top: 4px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(var(--sunken-rgb), 0.45);
   overflow: hidden;
 }
 
@@ -1453,7 +1635,7 @@ body.flat .panel {
   bottom: -2px;
   left: 100%;
   width: 2px;
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(var(--raise-rgb), 0.5);
 }
 
 /* the downloadable voice / hearing packs */
@@ -1462,13 +1644,10 @@ body.flat .panel {
   margin: 4px 0 16px;
   padding: 12px;
   border-radius: 12px;
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  background: rgba(251, 191, 36, 0.07);
+  border: 1px solid rgba(var(--amber-rgb), 0.35);
+  background: rgba(var(--amber-rgb), 0.07);
 }
 
-.asset[hidden] {
-  display: none;
-}
 
 .asset-text strong {
   display: block;
@@ -1503,7 +1682,7 @@ body.flat .panel {
   gap: 8px;
   padding: 8px 10px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--raise-rgb), 0.03);
   border: 1px solid var(--edge);
   font-size: 11.5px;
 }
@@ -1527,35 +1706,35 @@ body.flat .panel {
 }
 
 .fact-tag.local {
-  background: rgba(52, 211, 153, 0.16);
-  border: 1px solid rgba(52, 211, 153, 0.4);
-  color: #9ff0d0;
+  background: rgba(var(--emerald-rgb), 0.16);
+  border: 1px solid rgba(var(--emerald-rgb), 0.4);
+  color: var(--tone-emerald);
 }
 
 .fact-tag.cloud {
-  background: rgba(244, 63, 94, 0.14);
-  border: 1px solid rgba(244, 63, 94, 0.4);
-  color: #ffc9d2;
+  background: rgba(var(--danger-rgb), 0.14);
+  border: 1px solid rgba(var(--danger-rgb), 0.4);
+  color: var(--tone-rose);
 }
 
 .danger {
   width: 100%;
   padding: 8px;
   border-radius: 9px;
-  border: 1px solid rgba(244, 63, 94, 0.4);
-  background: rgba(244, 63, 94, 0.1);
-  color: #ffc9d2;
+  border: 1px solid rgba(var(--danger-rgb), 0.4);
+  background: rgba(var(--danger-rgb), 0.1);
+  color: var(--tone-rose);
   font-size: 11.5px;
   transition: background 150ms ease;
 }
 
 .danger:hover {
-  background: rgba(244, 63, 94, 0.22);
+  background: rgba(var(--danger-rgb), 0.22);
 }
 
 .danger.confirming {
-  border-color: rgba(244, 63, 94, 0.8);
-  background: rgba(244, 63, 94, 0.3);
+  border-color: rgba(var(--danger-rgb), 0.8);
+  background: rgba(var(--danger-rgb), 0.3);
   color: #fff;
   font-weight: 600;
 }
@@ -1572,7 +1751,7 @@ body.flat .panel {
   flex-direction: column;
   gap: 10px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(244, 63, 94, 0.45) transparent;
+  scrollbar-color: rgba(var(--rose-rgb), 0.45) transparent;
 }
 
 .messages::-webkit-scrollbar {
@@ -1585,13 +1764,13 @@ body.flat .panel {
 
 .messages::-webkit-scrollbar-thumb {
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(244, 63, 94, 0.55), rgba(217, 70, 239, 0.5));
+  background: linear-gradient(180deg, rgba(var(--rose-rgb), 0.55), rgba(var(--fuchsia-rgb), 0.5));
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 .messages::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(244, 63, 94, 0.8), rgba(217, 70, 239, 0.75));
+  background: linear-gradient(180deg, rgba(var(--rose-rgb), 0.8), rgba(var(--fuchsia-rgb), 0.75));
   background-clip: padding-box;
 }
 
@@ -1613,7 +1792,7 @@ body.flat .panel {
   margin-top: 3px;
   border-radius: 50%;
   background: radial-gradient(circle at 34% 30%, var(--amber), var(--rose) 55%, var(--fuchsia));
-  box-shadow: 0 0 8px rgba(217, 70, 239, 0.4);
+  box-shadow: 0 0 8px rgba(var(--fuchsia-rgb), 0.4);
 }
 
 .bubble {
@@ -1628,22 +1807,22 @@ body.flat .panel {
 }
 
 .msg.buddy .bubble {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 214, 170, 0.1);
+  background: rgba(var(--raise-rgb), 0.06);
+  border: 1px solid rgba(var(--edge-rgb), 0.1);
   border-bottom-left-radius: 5px;
 }
 
 .msg.user .bubble {
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.9), rgba(244, 63, 94, 0.92));
-  color: #2a0d14;
+  background: linear-gradient(135deg, rgba(var(--amber-rgb), 0.9), rgba(var(--rose-rgb), 0.92));
+  color: var(--on-accent);
   font-weight: 500;
   border-bottom-right-radius: 5px;
 }
 
 .msg.error .bubble {
-  background: rgba(244, 63, 94, 0.14);
-  border: 1px solid rgba(244, 63, 94, 0.4);
-  color: #ffc9d2;
+  background: rgba(var(--danger-rgb), 0.14);
+  border: 1px solid rgba(var(--danger-rgb), 0.4);
+  color: var(--tone-rose);
 }
 
 /*
@@ -1663,9 +1842,9 @@ body.flat .panel {
   max-width: 92%;
   padding: 5px 10px;
   border-radius: 8px;
-  background: rgba(52, 211, 153, 0.09);
-  border: 1px solid rgba(52, 211, 153, 0.3);
-  color: #9ff0d0;
+  background: rgba(var(--emerald-rgb), 0.09);
+  border: 1px solid rgba(var(--emerald-rgb), 0.3);
+  color: var(--tone-emerald);
   font-size: 11.5px;
   text-align: center;
 }
@@ -1691,17 +1870,17 @@ body.flat .panel {
 .bubble code {
   padding: 1px 4px;
   border-radius: 5px;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(var(--sunken-rgb), 0.35);
   font-family: "Cascadia Code", "SF Mono", Consolas, monospace;
   font-size: 11.5px;
-  color: #ffd9a8;
+  color: var(--tone-amber);
 }
 
 .bubble pre {
   margin: 6px 0;
   padding: 8px 10px;
   border-radius: 9px;
-  background: rgba(0, 0, 0, 0.42);
+  background: rgba(var(--sunken-rgb), 0.42);
   overflow-x: auto;
 }
 
@@ -1711,11 +1890,11 @@ body.flat .panel {
 }
 
 .bubble a {
-  color: #ffb3c1;
+  color: var(--tone-rose-strong);
 }
 
 .bubble strong {
-  color: #ffd9a8;
+  color: var(--tone-amber);
 }
 
 .typing {
@@ -1766,10 +1945,6 @@ body.flat .panel {
 
 /* speaking equalizer */
 
-/* An author `display` rule outranks the UA rule for [hidden], so restate it. */
-.equalizer[hidden] {
-  display: none;
-}
 
 .equalizer {
   display: flex;
@@ -1833,12 +2008,99 @@ body.flat .panel {
 
 /* composer */
 
+/* ── pictures waiting to be sent ─────────────────────────────────────────── */
+
+.attachments {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px 0;
+  overflow-x: auto;
+}
+
+.attachment {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  overflow: hidden;
+  background: rgba(var(--sunken-rgb), 0.3);
+}
+
+.attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Sits on the thumbnail rather than beside it — at this size a separate
+   control would be a bigger target than the thing it removes. */
+.attachment button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(var(--float-rgb), 0.86);
+  border: 1px solid var(--edge);
+  color: var(--text);
+}
+
+.attachment button svg {
+  width: 10px;
+  height: 10px;
+  stroke-width: 2.6;
+}
+
+/* Where a picture used to be, once it has been aged out of a saved chat. */
+.bubble-image-gone {
+  display: block;
+  margin: 2px 0 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px dashed rgba(var(--edge-rgb), 0.25);
+  color: var(--dim-2);
+  font-size: 11px;
+}
+
+/* A picture that came with a message, in the transcript. */
+.bubble-image {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  margin: 2px 0 6px;
+  border-radius: 9px;
+  border: 1px solid rgba(var(--edge-rgb), 0.12);
+}
+
+/* The whole panel is a drop target, so the cue has to be the whole panel. */
+.panel.dropping::after {
+  content: "Drop the picture here";
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  border: 2px dashed rgba(var(--rose-rgb), 0.7);
+  background: rgba(var(--sunken-rgb), 0.55);
+  color: var(--text);
+  font-size: 12.5px;
+  pointer-events: none;
+}
+
 .composer {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 10px 12px 12px;
-  border-top: 1px solid rgba(255, 214, 170, 0.09);
+  border-top: 1px solid rgba(var(--edge-rgb), 0.09);
 }
 
 .composer-input {
@@ -1848,7 +2110,7 @@ body.flat .panel {
   padding: 0 12px;
   border-radius: 11px;
   border: 1px solid var(--edge);
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(var(--sunken-rgb), 0.3);
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -1858,13 +2120,13 @@ body.flat .panel {
 }
 
 .composer-input::placeholder {
-  color: #8a7880;
+  color: var(--dim-2);
 }
 
 .composer-input:focus {
   outline: none;
-  border-color: rgba(244, 63, 94, 0.6);
-  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+  border-color: rgba(var(--rose-rgb), 0.6);
+  box-shadow: 0 0 0 3px rgba(var(--rose-rgb), 0.14);
 }
 
 .send {
@@ -1873,9 +2135,9 @@ body.flat .panel {
   width: 36px;
   height: 36px;
   border-radius: 11px;
-  color: #2a0d14;
+  color: var(--on-accent);
   background: var(--warm-grad);
-  box-shadow: 0 4px 14px rgba(244, 63, 94, 0.35);
+  box-shadow: 0 4px 14px rgba(var(--rose-rgb), 0.35);
   transition: transform 140ms ease, filter 140ms ease;
 }
 
@@ -1922,7 +2184,7 @@ body.flat .panel {
   height: 46px;
   border-radius: 50%;
   background: radial-gradient(circle at 34% 30%, var(--amber), var(--rose) 55%, var(--fuchsia));
-  box-shadow: 0 0 22px rgba(244, 63, 94, 0.45);
+  box-shadow: 0 0 22px rgba(var(--rose-rgb), 0.45);
   animation: breathe 4.2s ease-in-out infinite;
 }
 
@@ -1950,7 +2212,7 @@ body.flat .panel {
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: #cbb6bd;
+  color: var(--dim-1);
 }
 
 .panel.setup input {
@@ -1960,7 +2222,7 @@ body.flat .panel {
   padding: 0 11px;
   border-radius: 10px;
   border: 1px solid var(--edge);
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(var(--sunken-rgb), 0.34);
   color: var(--text);
   font: inherit;
   font-size: 12.5px;
@@ -1970,21 +2232,18 @@ body.flat .panel {
 
 .panel.setup input:focus {
   outline: none;
-  border-color: rgba(244, 63, 94, 0.6);
-  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+  border-color: rgba(var(--rose-rgb), 0.6);
+  box-shadow: 0 0 0 3px rgba(var(--rose-rgb), 0.14);
 }
 
 /* ── first run: the download, and nothing to decide ─────────────────────── */
 
-.ready[hidden] {
-  display: none;
-}
 
 .bar {
   height: 8px;
   margin-bottom: 12px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(var(--sunken-rgb), 0.4);
   border: 1px solid var(--edge);
   overflow: hidden;
 }
@@ -1995,7 +2254,7 @@ body.flat .panel {
   height: 100%;
   border-radius: 999px;
   background: var(--warm-grad);
-  box-shadow: 0 0 12px rgba(244, 63, 94, 0.5);
+  box-shadow: 0 0 12px rgba(var(--rose-rgb), 0.5);
   transition: width 300ms ease;
 }
 
@@ -2029,12 +2288,12 @@ body.flat .panel {
 }
 
 .ready.failed .bar-fill {
-  background: linear-gradient(90deg, var(--rose), #b91c3c);
+  background: linear-gradient(90deg, var(--danger), #b91c3c);
   animation: none;
 }
 
 .ready.failed .ready-line {
-  color: #ffc9d2;
+  color: var(--tone-rose);
 }
 
 .link-btn {
@@ -2067,14 +2326,14 @@ body.flat .panel {
   padding: 10px 11px;
   border-radius: 12px;
   border: 1px solid var(--edge);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--raise-rgb), 0.03);
   text-align: left;
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
 .mode-tab:hover {
   transform: translateY(-1px);
-  border-color: rgba(244, 63, 94, 0.45);
+  border-color: rgba(var(--rose-rgb), 0.45);
 }
 
 .mode-tab strong {
@@ -2092,13 +2351,10 @@ body.flat .panel {
 }
 
 .mode-tab.is-on {
-  border-color: rgba(251, 191, 36, 0.6);
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.14), rgba(217, 70, 239, 0.12));
+  border-color: rgba(var(--amber-rgb), 0.6);
+  background: linear-gradient(135deg, rgba(var(--amber-rgb), 0.14), rgba(var(--fuchsia-rgb), 0.12));
 }
 
-.mode-pane[hidden] {
-  display: none;
-}
 
 .panel.setup select {
   width: 100%;
@@ -2107,7 +2363,7 @@ body.flat .panel {
   padding: 0 9px;
   border-radius: 10px;
   border: 1px solid var(--edge);
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(var(--sunken-rgb), 0.34);
   color: var(--text);
   font: inherit;
   font-size: 12.5px;
@@ -2116,14 +2372,10 @@ body.flat .panel {
 
 .panel.setup select:focus {
   outline: none;
-  border-color: rgba(244, 63, 94, 0.6);
-  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+  border-color: rgba(var(--rose-rgb), 0.6);
+  box-shadow: 0 0 0 3px rgba(var(--rose-rgb), 0.14);
 }
 
-.panel.setup input[hidden],
-.panel.setup select[hidden] {
-  display: none;
-}
 
 .opt {
   font-weight: 400;
@@ -2142,7 +2394,7 @@ body.flat .panel {
   padding: 9px 11px;
   border-radius: 10px;
   border: 1px solid var(--edge);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--raise-rgb), 0.03);
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--muted);
@@ -2158,8 +2410,8 @@ body.flat .panel {
 }
 
 .probe.up {
-  border-color: rgba(52, 211, 153, 0.45);
-  background: rgba(52, 211, 153, 0.09);
+  border-color: rgba(var(--emerald-rgb), 0.45);
+  background: rgba(var(--emerald-rgb), 0.09);
 }
 
 .probe.up .probe-dot {
@@ -2168,9 +2420,9 @@ body.flat .panel {
 }
 
 .probe.down {
-  border-color: rgba(244, 63, 94, 0.45);
-  background: rgba(244, 63, 94, 0.09);
-  color: #ffc9d2;
+  border-color: rgba(var(--rose-rgb), 0.45);
+  background: rgba(var(--rose-rgb), 0.09);
+  color: var(--tone-rose);
 }
 
 .probe.down .probe-dot {
@@ -2181,21 +2433,21 @@ body.flat .panel {
 .probe code {
   padding: 1px 4px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(var(--sunken-rgb), 0.4);
   font-family: "Cascadia Code", "SF Mono", Consolas, monospace;
   font-size: 10.5px;
-  color: #ffd9a8;
+  color: var(--tone-amber);
 }
 
 .setup-hint {
   margin: 0 0 14px;
   font-size: 10.5px;
   line-height: 1.5;
-  color: #8a7880;
+  color: var(--dim-2);
 }
 
 .setup-hint code {
-  color: #ffd9a8;
+  color: var(--tone-amber);
   font-family: "Cascadia Code", "SF Mono", Consolas, monospace;
 }
 
@@ -2203,9 +2455,9 @@ body.flat .panel {
   margin: 10px 0 0;
   padding: 8px 10px;
   border-radius: 9px;
-  background: rgba(244, 63, 94, 0.14);
-  border: 1px solid rgba(244, 63, 94, 0.4);
-  color: #ffc9d2;
+  background: rgba(var(--danger-rgb), 0.14);
+  border: 1px solid rgba(var(--danger-rgb), 0.4);
+  color: var(--tone-rose);
   font-size: 11.5px;
   line-height: 1.45;
 }
@@ -2215,11 +2467,11 @@ body.flat .panel {
   height: 40px;
   margin-top: 14px;
   border-radius: 11px;
-  color: #2a0d14;
+  color: var(--on-accent);
   font-size: 13px;
   font-weight: 600;
   background: var(--warm-grad);
-  box-shadow: 0 6px 18px rgba(244, 63, 94, 0.35);
+  box-shadow: 0 6px 18px rgba(var(--rose-rgb), 0.35);
   transition: filter 140ms ease, transform 140ms ease;
 }
 
@@ -2240,7 +2492,7 @@ body.flat .panel {
   margin: 14px 0 0;
   font-size: 10.5px;
   line-height: 1.55;
-  color: #7d6c74;
+  color: var(--dim-3);
 }
 
 @media (prefers-reduced-motion: reduce) {

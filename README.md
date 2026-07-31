@@ -176,7 +176,7 @@ chosen the cloud or your own Whisper server — those choices are left alone.
 
 ### Letting Buddy do things on the computer
 
-**Off by default.** Turn it on in **Settings → Hearing → Let Buddy open things**, and Buddy can:
+**Off by default.** Turn it on in **Settings → Doing → Let Buddy open things**, and Buddy can:
 
 | Ask for | What happens |
 | --- | --- |
@@ -184,13 +184,29 @@ chosen the cloud or your own Whisper server — those choices are left alone.
 | “search the web for tide times” | opens a DuckDuckGo search |
 | “open my chats folder” | opens one of Buddy's own folders |
 
+**Let Buddy read, write and delete files**, in the same place, adds four more — and these need a
+folder as well as a switch, because there is no default one:
+
+| Ask for | What happens |
+| --- | --- |
+| “what files do I have?” | lists a folder you have shared |
+| “read my shopping list” | reads a text file out of one |
+| “make a note that the bins go out on Tuesday” | writes one, keeping the old version as `.bak` |
+| “delete bins.txt” | moves it to the recycle bin, never off the disk |
+
 That is the whole list, and it is a list on purpose. **The model never runs anything.** It writes a
 marker line — `[[open_url: https://example.com]]` — which the server parses, checks against the list
 above, and validates: a URL has to parse and has to be `http` or `https`, so `file://`,
 `javascript:` and `data:` are refused; a folder has to be one of three names, so a path cannot be
-smuggled in. The main process validates it a second time, because it is the only part of Buddy that
-hands anything to the operating system and should not trust a message just because it arrived.
-Nothing happens silently: every action is written into the transcript as it runs.
+smuggled in. A file path is resolved, symlinks and all, and then checked to sit inside a folder you
+named by hand; reading can be widened to the whole machine, writing and deleting never can. The main
+process validates it a second time, because it is the only part of Buddy that hands anything to the
+operating system and should not trust a message just because it arrived. Nothing happens silently:
+every action is written into the transcript as it runs.
+
+Deleting is the one thing with nothing kept behind it, so it is narrower than the rest: one named
+file at a time, never a folder, and it goes to the recycle bin rather than being unlinked. If the
+recycle bin refuses it, Buddy refuses the delete rather than falling back on removing it outright.
 
 The 1B default model manages this more often than you would expect — six times out of six on direct
 phrasings when last measured — but it is genuinely weak at it and will sometimes answer “opening it

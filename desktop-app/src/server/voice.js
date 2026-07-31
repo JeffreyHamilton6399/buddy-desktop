@@ -55,6 +55,8 @@ function isReady(configDir) {
 
 // ── loading ───────────────────────────────────────────────────────────────
 
+const isLoaded = () => Boolean(tts);
+
 function scheduleIdleUnload() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => unload(), IDLE_UNLOAD_MS);
@@ -113,7 +115,21 @@ function unload() {
  * The line is deliberately not anything Buddy says, so it does not sit in the
  * render cache taking up a slot that a real repeated phrase could use.
  */
+/**
+ * See builtin.warmUp — `maintain` means "keep it warm", never "load it".
+ *
+ * The dummy line matters here in a way it does not for the other two: Kokoro's
+ * first synthesis is far slower than the rest, so one throwaway phrase at load
+ * time is what stops the first thing Buddy actually says from being late. It is
+ * a real inference though, so it belongs to loading and must not be repeated on
+ * every keep-warm ping — which, at one ping every five minutes for as long as
+ * the wake word is on, is exactly what it used to be.
+ */
 async function warmUp(configDir, options = {}) {
+  const { maintain = false } = options;
+  if (maintain && !isLoaded()) return;
+  if (isLoaded()) return;
+
   await load(configDir);
   await speak({ configDir, text: 'Ready.', voice: options.voice }).catch(() => {
     /* a failed warm-up just means the first real line is a second slower */
@@ -363,5 +379,5 @@ module.exports = {
   speakableText,
   chunkForSpeech,
   snapshot: () => hf.snapshot('voice'),
-  isLoaded: () => Boolean(tts),
+  isLoaded,
 };

@@ -16,6 +16,44 @@ const path = require('path');
 const crypto = require('crypto');
 
 const MAX_STORED_MESSAGES = 400; // per conversation, oldest trimmed first
+
+/**
+ * How many bytes of pictures one conversation may carry.
+ *
+ * Text messages are small enough that four hundred of them cost nothing, which
+ * is why they are simply counted. Pictures are not: four megabytes each, four to
+ * a message, and every conversation is held in memory for the life of the
+ * process once load() has read it. A few weeks of screenshots would therefore
+ * sit in RAM permanently and make every launch slower, which is the opposite of
+ * what a local-first app should do to a machine.
+ *
+ * So the pictures are a sliding window. The most recent ones stay — those are
+ * the ones a follow-up question is about, and the ones you see when you scroll
+ * back — and older ones lose their data while keeping the message they belonged
+ * to. Twelve megabytes is roughly the last half-dozen screenshots.
+ */
+const MAX_IMAGE_BYTES_PER_CHAT = 12 * 1024 * 1024;
+
+/**
+ * Drop the picture data from the oldest image-bearing messages until the
+ * conversation is back under budget. The message itself, and the fact that it
+ * had a picture, are both kept.
+ */
+function forgetOldPictures(conversation) {
+  const withImages = conversation.messages.filter((message) => Array.isArray(message.images) && message.images.length);
+  if (!withImages.length) return;
+
+  const weigh = (message) =>
+    message.images.reduce((total, image) => total + (image.data ? image.data.length : 0), 0);
+
+  let total = withImages.reduce((sum, message) => sum + weigh(message), 0);
+  // Oldest first: `messages` is in order, and filter preserves it.
+  for (const message of withImages) {
+    if (total <= MAX_IMAGE_BYTES_PER_CHAT) break;
+    total -= weigh(message);
+    message.images = message.images.map(({ mime, name }) => ({ mime, name, forgotten: true }));
+  }
+}
 const TITLE_LENGTH = 52;
 
 class History {
@@ -111,11 +149,23 @@ class History {
     return this.get(id) || this.create();
   }
 
-  append(conversation, role, content) {
-    conversation.messages.push({ role, content, at: new Date().toISOString() });
+  /**
+   * `images` is optional and only ever set on a user turn. It is stored with the
+   * message so reopening a conversation shows the picture that was asked about,
+   * and so a follow-up question ("what about the top left?") still has it in
+   * context. They are capped per message in server.js before they get this far.
+   */
+  append(conversation, role, content, images) {
+    conversation.messages.push({
+      role,
+      content,
+      ...(Array.isArray(images) && images.length ? { images } : {}),
+      at: new Date().toISOString(),
+    });
     if (conversation.messages.length > MAX_STORED_MESSAGES) {
       conversation.messages.splice(0, conversation.messages.length - MAX_STORED_MESSAGES);
     }
+    forgetOldPictures(conversation);
     conversation.updatedAt = new Date().toISOString();
 
     if (conversation.title === 'New chat' && role === 'user') {
