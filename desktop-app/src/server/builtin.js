@@ -14,7 +14,20 @@
 
 const CONTEXT_SIZE = 4096;
 const MAX_REPLY_TOKENS = 400;
-const IDLE_UNLOAD_MS = 30 * 60 * 1000; // give the memory back if Buddy goes unused
+/**
+ * How long the weights stay resident after the last reply.
+ *
+ * Half an hour was too generous. This is several gigabytes of memory and, where
+ * llama.cpp offloads to the GPU, over half a typical card — so one question at
+ * lunchtime made everything else on the machine slower until well into the
+ * afternoon, and asking anything at all reset the clock. Ten minutes still
+ * covers a conversation, since every reply pushes it back; it just stops a
+ * single question buying half an hour of tax.
+ *
+ * Reloading costs about ten seconds, and the orb hides most of that by warming
+ * the moment it hears its name rather than when the question arrives.
+ */
+const IDLE_UNLOAD_MS = 10 * 60 * 1000;
 
 let llamaPromise = null;
 let loaded = null; // { llama, model, context, session, modelPath }

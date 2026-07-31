@@ -844,9 +844,12 @@ export function initOrb() {
     clearInterval(keepWarmTimer);
     keepWarmTimer = null;
     if (!on) return;
-    api('/warm', { ears: true }).catch(() => {});
+    // Never the brain. Listening for a name does not need several gigabytes of
+    // language model resident; hearing one does, and that is what the /warm
+    // just above answer() is for.
+    api('/warm', { ears: true, brain: false }).catch(() => {});
     keepWarmTimer = setInterval(() => {
-      api('/warm', { maintain: true, ears: true }).catch(() => {});
+      api('/warm', { maintain: true, ears: true, brain: false }).catch(() => {});
     }, 5 * 60 * 1000);
   }
 

@@ -806,8 +806,17 @@ export function initPanel() {
   });
 
   window.buddy.onPanelVisibility((visible) => {
-    if (visible) setTimeout(() => input.focus(), 40);
-    else {
+    if (visible) {
+      setTimeout(() => input.focus(), 40);
+      /**
+       * Opening the panel is as good a sign that a question is coming as the
+       * orb hearing its name, and it buys the same thing: the model is no
+       * longer resident while Buddy sits idle, so somebody has to start it
+       * loading before the question arrives rather than after. Costs nothing
+       * when it is already warm.
+       */
+      api('/warm', {}).catch(() => {});
+    } else {
       speaker.stop();
       stopRecording({ send: false });
     }

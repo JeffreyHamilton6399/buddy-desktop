@@ -850,20 +850,28 @@ async function handleSpeechDownload(req, res) {
  * overlaps the load with the moment the user spends asking their question.
  */
 /**
- * @param {{ maintain?: boolean, ears?: boolean }} options `maintain` is a
- *   periodic keep-warm ping: it holds on to whatever is already loaded and
- *   loads nothing new. See builtin.warmUp for why the difference matters so
- *   much. `ears` exempts the transcriber from that, because it is the one
- *   engine the wake word cannot wait for — see hearing.warmUp.
+ * @param {{ maintain?: boolean, ears?: boolean, brain?: boolean }} options
+ *   `maintain` is a periodic keep-warm ping: it holds on to whatever is already
+ *   loaded and loads nothing new. See builtin.warmUp for why the difference
+ *   matters so much. `ears` exempts the transcriber from that, because it is
+ *   the one engine the wake word cannot wait for — see hearing.warmUp.
+ *
+ *   `brain: false` says "everything except the language model". That is the
+ *   startup case, and it is the difference between Buddy sitting idle costing
+ *   a few hundred megabytes and costing several gigabytes of memory and over
+ *   half a typical graphics card. The model is by far the largest thing here
+ *   and the only one nothing needs until Buddy is actually spoken to.
  */
-async function warmEverything({ maintain = false, ears = false } = {}) {
+async function warmEverything({ maintain = false, ears = false, brain = true } = {}) {
   const settings = readSettings();
   const jobs = [];
 
   if (providers.usesBuiltinModel(settings)) {
     const id = activeModelId(settings);
     if (modelStore.isReady(configDir(), id)) {
-      jobs.push(builtin.warmUp(modelStore.modelPath(configDir(), id), { maintain }));
+      // Not wanting the brain is the same instruction as a maintenance ping:
+      // keep it if somebody already loaded it, never load it from cold.
+      jobs.push(builtin.warmUp(modelStore.modelPath(configDir(), id), { maintain: maintain || !brain }));
     }
   }
   if (providers.usesLocalVoice(settings) && voice.isReady(configDir())) {
@@ -883,6 +891,9 @@ async function handleWarm(req, res) {
   warmEverything({
     maintain: body && body.maintain === true,
     ears: body && body.ears === true,
+    // Present and false is the only way to decline the brain; a bare /warm,
+    // which is what the orb sends the instant it hears its name, still wants it.
+    brain: !(body && body.brain === false),
   }).catch(() => {});
   return sendJson(res, 202, {
     warming: {
@@ -1557,12 +1568,23 @@ function start(options = {}) {
       if (!process.env.BUDDY_TOKEN) console.log(`    token    ${AUTH_TOKEN}`);
       console.log('');
 
-      // Start loading the models now rather than on the first message. Buddy sits
-      // open all day waiting to be spoken to, so paying twelve seconds at launch
-      // — while nobody is waiting — beats paying it the first time somebody is.
+      /**
+       * Get the small engines ready now — but not the language model.
+       *
+       * Buddy sits open all day waiting to be spoken to, and the ears and voice
+       * are tens of megabytes, so having those ready costs nothing worth
+       * counting. The model is different: several gigabytes of weights and, on
+       * a machine that offloads to the GPU, over half a typical card. Loading
+       * it at launch meant merely having Buddy running made everything else on
+       * the machine slower, whether or not anyone ever spoke to it.
+       *
+       * Nothing is lost by waiting. The orb calls /warm the instant it hears
+       * its name, which overlaps the load with the seconds the user spends
+       * asking their question — the case this was really for all along.
+       */
       if (options.warm !== false) {
         const warmStarted = Date.now();
-        warmEverything()
+        warmEverything({ ears: true, brain: false })
           .then(() => console.log(`[buddy] warm and ready in ${((Date.now() - warmStarted) / 1000).toFixed(1)}s`))
           .catch(() => {});
       }
