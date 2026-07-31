@@ -48,6 +48,18 @@ a {
   text-decoration: none;
 }
 
+/* The orb is the only colour on the page; let it tint the selection too. */
+::selection {
+  background: rgba(244, 63, 94, 0.3);
+  color: #fff;
+}
+
+/* A dark page with a light scrollbar looks like a bug on Windows. */
+html {
+  color-scheme: dark;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
 h1,
 h2,
 h3 {
@@ -331,6 +343,13 @@ code {
   gap: 30px 36px;
 }
 
+/* A rule over each column. It reads as a set of four rather than four
+   paragraphs that happen to be side by side, and costs one line. */
+.item {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
 .item h3 {
   font-size: 15.5px;
   margin-bottom: 7px;
@@ -422,6 +441,12 @@ tbody tr:last-child td {
   padding: 20px;
   border: 1px solid var(--line-soft);
   border-radius: 12px;
+  transition: border-color 130ms ease, background 130ms ease;
+}
+
+.dl-card:hover {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .dl-card.is-yours {
@@ -499,7 +524,11 @@ tbody tr:last-child td {
 
 @media (min-width: 1000px) {
   .hero {
-    padding: 72px 0 80px;
+    padding: 76px 0 84px;
+  }
+  /* More air between sections once there is room for it. */
+  .band {
+    padding: 64px 0;
   }
   /* Copy on the left, the app itself on the right. */
   .hero-grid {
