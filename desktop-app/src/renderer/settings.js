@@ -816,24 +816,14 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
 
   // ── what Buddy may do ───────────────────────────────────────────────────
 
-  $('allow-actions').addEventListener('change', async (event) => {
-    if (!(await save({ allowActions: event.target.checked }))) {
+  $('allow-system').addEventListener('change', async (event) => {
+    if (!(await save({ allowSystem: event.target.checked }))) {
       event.target.checked = !event.target.checked;
       return;
     }
     await refreshRuntime();
     applyDoingPane();
-    setNote(event.target.checked ? 'Buddy can open things now.' : 'Buddy can no longer open anything.');
-  });
-
-  $('allow-files').addEventListener('change', async (event) => {
-    if (!(await save({ allowFiles: event.target.checked }))) {
-      event.target.checked = !event.target.checked;
-      return;
-    }
-    await refreshRuntime();
-    applyDoingPane();
-    setNote(event.target.checked ? 'Buddy can work with files now.' : 'Buddy can no longer touch files.');
+    setNote(event.target.checked ? 'Buddy can reach your system now.' : 'Buddy is back inside its own window.');
   });
 
   $('add-file-root').addEventListener('click', async () => {
@@ -862,8 +852,12 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     if (!roots.length) {
       const empty = document.createElement('p');
       empty.className = 'pane-lede';
-      empty.textContent =
-        'No folders shared yet, so Buddy cannot read or write anything — the switch above does nothing on its own.';
+      const where = (runtime.writeRoots || [])[0];
+      // The empty case is the permissive one now, so it has to say so rather
+      // than read like nothing has been granted.
+      empty.textContent = runtime.allowSystem
+        ? `No folders picked. Buddy may write and delete anywhere under ${where || 'your home folder'}.`
+        : 'No folders picked. Turn the switch above on to let Buddy work with files.';
       list.appendChild(empty);
       return;
     }
@@ -901,21 +895,26 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
   }
 
   function applyDoingPane() {
-    $('allow-actions').checked = Boolean(runtime.allowActions);
-    $('allow-files').checked = Boolean(runtime.allowFiles);
+    $('allow-system').checked = Boolean(runtime.allowSystem);
     // Named for this machine, since the copy tells the user where to go looking.
     $('bin-name').textContent = binName();
     applyActionsNote();
     applyFileScope();
     renderFileRoots();
 
+    /**
+     * Where writing lands, said plainly.
+     *
+     * With no folder named this is the whole home folder, and that is exactly
+     * the case somebody should not have to infer from an empty list.
+     */
     const note = $('files-note');
-    if (!runtime.allowFiles) note.textContent = '';
+    if (!runtime.allowSystem) note.textContent = '';
     else if (!(runtime.fileRoots || []).length) {
-      note.textContent =
-        runtime.fileScope === 'everywhere'
-          ? 'Buddy can read anything, but cannot write or delete until you add a folder.'
-          : 'Add a folder to make this do anything.';
+      const where = (runtime.writeRoots || [])[0];
+      note.textContent = where
+        ? `No folders picked, so Buddy may write and delete anywhere under ${where}. Add one to narrow it.`
+        : 'Add a folder to narrow where Buddy may write.';
     } else note.textContent = 'These are the only folders Buddy can write to or delete in.';
   }
 
@@ -956,7 +955,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
    */
   function applyActionsNote() {
     const note = $('actions-note');
-    if (!runtime.allowActions) {
+    if (!runtime.allowSystem) {
       note.textContent = '';
       return;
     }

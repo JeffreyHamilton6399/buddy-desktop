@@ -313,6 +313,27 @@ function clampToDisplays(position) {
   return fits ? position : defaultOrbPosition();
 }
 
+/**
+ * Keep a window out of the taskbar, and keep it out.
+ *
+ * `skipTaskbar` at construction is not enough on Windows. It is applied once,
+ * and showing a window that was hidden — which is the panel's whole lifecycle,
+ * and the orb's whenever a screenshot is taken — hands it back a taskbar button.
+ * So it is reasserted on every show.
+ *
+ * This matters more here than it looks. Buddy is meant to live in the
+ * notification area and be reached by its orb; a taskbar button makes it just
+ * another window, and one that cannot be closed the way the button implies.
+ */
+function keepOutOfTaskbar(window) {
+  const assert = () => {
+    if (window && !window.isDestroyed()) window.setSkipTaskbar(true);
+  };
+  assert();
+  window.on('show', assert);
+  window.on('restore', assert);
+}
+
 function createOrbWindow() {
   const position = clampToDisplays(state.orb || defaultOrbPosition());
 
@@ -341,6 +362,7 @@ function createOrbWindow() {
   });
 
   orbWindow.setAlwaysOnTop(true, 'screen-saver');
+  keepOutOfTaskbar(orbWindow);
   if (process.platform === 'darwin') orbWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   attachDiagnostics(orbWindow, 'orb');
   orbWindow.loadURL(rendererUrl('orb'));
@@ -377,6 +399,7 @@ function createPanelWindow() {
   });
 
   panelWindow.setAlwaysOnTop(true, 'screen-saver');
+  keepOutOfTaskbar(panelWindow);
   attachDiagnostics(panelWindow, 'panel');
   panelWindow.loadURL(rendererUrl('panel'));
 
@@ -730,7 +753,7 @@ function registerIpc() {
       const { readSettings } = require('./server/server.js');
       const settings = readSettings();
 
-      if (!settings.allowFiles) return { ok: false, error: 'Buddy is not allowed to touch files.' };
+      if (!settings.allowSystem) return { ok: false, error: 'Buddy is not allowed to touch files.' };
 
       /**
        * Reading and writing are checked against different root sets, and the

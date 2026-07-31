@@ -27,6 +27,7 @@
 
 const fs = require('fs');
 const fsp = require('fs/promises');
+const os = require('os');
 const path = require('path');
 
 /** Big enough for notes, code and documents; small enough to never be a disk image. */
@@ -77,13 +78,22 @@ function machineRoots() {
  * thing to want and costs you nothing if the model misunderstands; "write
  * anywhere on my whole computer" is how a confused model ends up in
  * C:\Windows\System32. So the wide scope widens reading and listing, and
- * writing stays inside folders that were named by hand.
+ * writing stays inside a named set.
+ *
+ * With no folders named, that set is the home folder. It used to be nothing at
+ * all, which meant the permission switch granted no writing until a folder was
+ * picked by hand; that second step was removed by request. The home folder
+ * rather than the whole drive is what is left of the idea: it still keeps
+ * writing away from Windows, Program Files and the other drives, so a
+ * misunderstanding costs documents rather than an operating system. Naming
+ * folders narrows it further and is still the only way to confine this.
  */
-function scopedRoots({ fileScope = 'folders', fileRoots = [] } = {}) {
+function scopedRoots({ fileScope = 'folders', fileRoots = [], allowSystem = false } = {}) {
   const named = normaliseRoots(fileRoots);
+  const write = named.length ? named : allowSystem ? normaliseRoots([os.homedir()]) : [];
   return {
-    read: fileScope === 'everywhere' ? normaliseRoots(machineRoots()) : named,
-    write: named,
+    read: fileScope === 'everywhere' ? normaliseRoots(machineRoots()) : named.length ? named : write,
+    write,
   };
 }
 

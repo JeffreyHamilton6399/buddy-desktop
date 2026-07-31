@@ -161,11 +161,29 @@ export function initPanel() {
 
   const screenButton = $('see-screen');
 
+  /**
+   * The paperclip and the screen button, when the brain has no eyes.
+   *
+   * These used to be hidden outright, which is why "show Buddy your screen"
+   * read as a feature that had stopped working: a control that is not there
+   * gives you nothing to ask about, and nothing to fix. They stay visible and
+   * disabled instead, and say what would make them work.
+   *
+   * Which is a real answer, not a shrug — the built-in llama.cpp engine cannot
+   * see at all, so the fix is always to change the brain rather than to hunt
+   * for a setting.
+   */
   function applyVisionAvailability() {
     const blind = runtime.canSee === false;
-    attachButton.hidden = blind;
-    screenButton.hidden = blind;
-    screenButton.title = `Show ${buddyName()} your screen`;
+    const why = 'needs a brain that can see — an Ollama vision model, or a cloud provider (Settings → Brain)';
+
+    attachButton.hidden = false;
+    screenButton.hidden = false;
+    attachButton.disabled = blind;
+    screenButton.disabled = blind;
+    attachButton.title = blind ? `Adding a picture ${why}` : 'Add a picture';
+    screenButton.title = blind ? `Showing ${buddyName()} your screen ${why}` : `Show ${buddyName()} your screen`;
+
     if (blind && pending.length) {
       pending = [];
       renderAttachments();

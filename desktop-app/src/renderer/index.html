@@ -379,33 +379,28 @@
                     as it happens — nothing is done quietly.
                   </p>
 
+                  <!--
+                    One switch, not two. "Open things" and "touch files" were
+                    never a distinction anybody could act on, and reading them
+                    both to work out what Buddy could do was the whole problem.
+                  -->
                   <label class="switch big">
-                    <input type="checkbox" id="allow-actions" />
+                    <input type="checkbox" id="allow-system" />
                     <span>
-                      <strong>Let Buddy open things</strong>
+                      <strong>Let Buddy into your system</strong>
                       <small>
-                        Web pages, searches, and its own folders — nothing else, and only when you ask.
+                        Open web pages and searches, look at your screen, and read, write and delete files.
+                        The old version of anything it overwrites is kept alongside it as a .bak file,
+                        anything it deletes goes to the <span id="bin-name">Recycle Bin</span>, and it will
+                        not touch programs, keys or databases whatever else you allow.
                       </small>
                     </span>
                   </label>
                   <p class="pane-lede" id="actions-note"></p>
 
-                  <h3>Files</h3>
-                  <label class="switch big">
-                    <input type="checkbox" id="allow-files" />
-                    <span>
-                      <strong>Let Buddy read, write and delete files</strong>
-                      <small>
-                        The old version of anything it overwrites is kept alongside it as a .bak file, and
-                        anything it deletes goes to the <span id="bin-name">Recycle Bin</span> rather than
-                        being destroyed.
-                      </small>
-                    </span>
-                  </label>
-
                   <!--
-                    Reading and writing are scoped separately on purpose. Looking
-                    at everything is a reasonable thing to want; writing to
+                    Reading and writing are still scoped separately. Looking at
+                    everything is a reasonable thing to want; writing to
                     everything is how a confused model reaches System32.
                   -->
                   <h4>What it may look at</h4>
@@ -422,6 +417,11 @@
                   <p class="pane-lede" id="scope-note"></p>
 
                   <h4>Folders it may write to and delete in</h4>
+                  <!--
+                    Naming folders is now the only way to narrow writing, since
+                    the switch above no longer waits for one. Empty means the
+                    whole home folder, which the note below says out loud.
+                  -->
                   <div class="model-list" id="file-roots"></div>
                   <div class="row">
                     <button class="btn" id="add-file-root" type="button">Add a folder…</button>

@@ -98,11 +98,29 @@ const DEFAULTS = {
    * point of the orb, and silencing it would just leave a mute circle.
    */
   speakReplies: true,
-  // Buddy reaching outside its own window is opt-in, always.
-  allowActions: false,
-  // Reading and writing files is opt-in twice over: the switch has to be on
-  // *and* at least one folder named. On its own the switch grants nothing.
-  allowFiles: false,
+  /**
+   * Buddy reaching outside its own window is opt-in, always — but it is now one
+   * decision rather than two.
+   *
+   * There used to be a switch for opening things and a second for files, and
+   * nobody reading them could say what the difference bought them. This is the
+   * whole of it: on, Buddy can open pages, run searches, look at the screen, and
+   * read, write and delete files. Off, it can do none of them.
+   *
+   * Writing and deleting no longer require a folder to be named first. That was
+   * a deliberate second lock and it is gone by request — see fileRoots for what
+   * happens instead, and note that the guards which do not depend on it still
+   * hold: programs and keys are refused by extension, deletes go to the recycle
+   * bin, and every action is written into the transcript as it happens.
+   */
+  allowSystem: false,
+  /**
+   * Folders Buddy may write to and delete in.
+   *
+   * Empty now means the home folder rather than nowhere. Naming folders here
+   * narrows it back down, which is the only way left to confine writing, so it
+   * is worth doing if you ever want that.
+   */
   fileRoots: [],
   /**
    * How far Buddy may look.
@@ -119,7 +137,7 @@ const DEFAULTS = {
 const FILE_SCOPES = ['folders', 'everywhere'];
 
 /** Bumped whenever defaults change in a way an existing install should inherit. */
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 
 const OLLAMA_DEFAULT_MODEL = 'llama3.2';
 const REQUEST_TIMEOUT_MS = 120000;
@@ -147,7 +165,22 @@ function migrateSettings(raw) {
   // id looks nothing like that, so a carried-over name would never match.
   if (tts.provider === 'kokoro' && tts.voice && !/^[a-z]{2}_[a-z]+$/.test(tts.voice)) tts.voice = '';
 
-  return { ...input, tts, asr, version: SETTINGS_VERSION };
+  /**
+   * The two permission switches became one, and the one grants more than either
+   * did — writing and deleting no longer wait for a folder to be named.
+   *
+   * So it is only inherited by installs that had *both* halves on already.
+   * Anyone who had opened things but never allowed files would otherwise wake
+   * up after an update able to delete inside their home folder, having agreed
+   * to no such thing. Those installs get the switch off and one flip to make,
+   * which is the version of this that cannot surprise anybody.
+   */
+  const permissions = {};
+  if (input.allowSystem === undefined) {
+    permissions.allowSystem = input.allowActions === true && input.allowFiles === true;
+  }
+
+  return { ...input, tts, asr, ...permissions, version: SETTINGS_VERSION };
 }
 
 /**
@@ -249,9 +282,8 @@ function normaliseSettings(raw) {
     },
     saveHistory: input.saveHistory !== false,
     speakReplies: input.speakReplies !== false,
-    // Default to false rather than true: these have to be asked for.
-    allowActions: input.allowActions === true,
-    allowFiles: input.allowFiles === true,
+    // Default to false rather than true: this has to be asked for.
+    allowSystem: input.allowSystem === true,
     fileRoots: files.normaliseRoots(input.fileRoots),
     fileScope: pick(input.fileScope, FILE_SCOPES, DEFAULTS.fileScope),
   };

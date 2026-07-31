@@ -248,30 +248,33 @@ const REQUEST_PATTERN =
 const FILE_REQUEST_PATTERN =
   /\b(file|files|folder|directory|note|notes|write|writes|writing|save|saves|saving|edit|edits|editing|append|add to|create|read|list|rename|delete|deletes|deleting|remove|removes|removing|erase|bin|trash|get rid of|throw away|txt|markdown|\.md)\b/i;
 
-function looksLikeRequest(text, { allowFiles = false } = {}) {
+function looksLikeRequest(text, { allowSystem = false } = {}) {
   const source = String(text || '');
   if (REQUEST_PATTERN.test(source)) return true;
-  return allowFiles && FILE_REQUEST_PATTERN.test(source);
+  return allowSystem && FILE_REQUEST_PATTERN.test(source);
 }
 
 /**
  * The instruction block for a given set of permissions.
  *
- * The file half is only ever added when files are switched on and a folder has
- * actually been shared. Describing an ability the model does not have is worse
- * than saying nothing: it will confidently claim to have saved something.
- *
- * The folders are named because a model that does not know where it is allowed
- * to write invents a path, gets refused, and apologises — which reads to the
- * user as the feature being broken.
+ * The file half rides on the same switch as everything else now, so it is added
+ * whenever that switch is on. What still varies is *where*, and that has to be
+ * stated exactly: a model that does not know which folders it may write to
+ * invents a path, gets refused, and apologises — which reads to the user as the
+ * feature being broken.
  */
-function instructionsFor({ allowFiles = false, fileRoots = [], fileScope = 'folders', readRoots = [] } = {}) {
+function instructionsFor({
+  allowSystem = false,
+  fileScope = 'folders',
+  readRoots = [],
+  writeRoots = [],
+} = {}) {
   const wide = fileScope === 'everywhere';
-  // Wide scope is enough on its own: there is always somewhere to read, even
-  // before a single folder has been named. Narrow scope still needs a folder.
-  if (!allowFiles || (!fileRoots.length && !wide)) return ACTION_INSTRUCTIONS;
+  if (!allowSystem) return ACTION_INSTRUCTIONS;
 
-  const folders = fileRoots.map((root) => `  ${root}`).join('\n');
+  // The writable set, which is the named folders or the home folder — never
+  // empty while the switch is on. See scopedRoots in files.js.
+  const folders = writeRoots.map((root) => `  ${root}`).join('\n');
   const places = readRoots.map((root) => `  ${root}`).join('\n');
 
   /**
@@ -284,9 +287,8 @@ function instructionsFor({ allowFiles = false, fileRoots = [], fileScope = 'fold
     ? 'You can read and list ANY file or folder on this computer. These are the ' +
       'places to start from:\n' +
       `${places}\n\n` +
-      (fileRoots.length
-        ? 'You can only WRITE or DELETE inside these folders:\n' + `${folders}\n\n`
-        : 'You cannot write to or delete any file — no folder has been shared for that yet.\n\n')
+      'You can only WRITE or DELETE inside these folders:\n' +
+      `${folders}\n\n`
     : 'You can also read, write and delete files, but ONLY inside these folders:\n' + `${folders}\n\n`;
 
   return (
@@ -370,7 +372,7 @@ function stripSpeakerLabel(text) {
 }
 
 function extractAction(reply, context = {}) {
-  const settings = { fileRoots: [], allowFiles: false, ...context };
+  const settings = { fileRoots: [], allowSystem: false, ...context };
   const text = stripSpeakerLabel(String(reply || ''));
   // Accept `[[name: arg]]`, `[[name | arg]]` and `[[action: name | arg]]`, since
   // which of those a model produces is largely luck.
@@ -396,7 +398,7 @@ function extractAction(reply, context = {}) {
   // A marker for a switched-off ability is refused rather than performed. The
   // instructions never mention these unless they are on, so reaching one means
   // the model invented it.
-  if (definition.needsFiles && !settings.allowFiles) {
+  if (definition.needsFiles && !settings.allowSystem) {
     return {
       reply: cleaned,
       action: null,

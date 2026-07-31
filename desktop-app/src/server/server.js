@@ -539,10 +539,12 @@ function describeRuntime() {
     orbSizes: providers.ORB_SIZES,
     saveHistory: settings.saveHistory,
     speakReplies: settings.speakReplies,
-    allowActions: settings.allowActions,
-    allowFiles: settings.allowFiles,
+    allowSystem: settings.allowSystem,
     fileRoots: settings.fileRoots,
     fileScope: settings.fileScope,
+    // Where writing actually lands when no folder has been named, so the
+    // settings pane can name it rather than saying "somewhere sensible".
+    writeRoots: filesStore.scopedRoots(settings).write,
     // What "everywhere" actually means on this machine, so the settings pane can
     // show it rather than promising something vague.
     machineRoots: filesStore.machineRoots(),
@@ -1049,14 +1051,14 @@ async function handleChat(req, res) {
   const lastSaid = [...conversation.messages].reverse().find((message) => message.role === 'user');
   const roots = filesStore.scopedRoots(settings);
   const permissions = {
-    allowFiles: settings.allowFiles,
+    allowSystem: settings.allowSystem,
     fileRoots: settings.fileRoots,
     fileScope: settings.fileScope,
     readRoots: roots.read,
     writeRoots: roots.write,
   };
   const wantsAction =
-    settings.allowActions &&
+    settings.allowSystem &&
     (alwaysOffersActions(settings) || actions.looksLikeRequest(lastSaid && lastSaid.content, permissions));
   const withClock = `${clockLine()}\n\n${basePrompt}`;
   const prompt = wantsAction ? `${withClock}\n\n${actions.instructionsFor(permissions)}` : withClock;

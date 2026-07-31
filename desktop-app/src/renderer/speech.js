@@ -179,13 +179,40 @@ export function createSpeaker({ onStart, onEnd, onError } = {}) {
         speaking = true;
         if (onStart) onStart();
 
-        // Start the first chunk, then always keep one in flight ahead of playback.
-        let pending = synthesize(chunks[0]);
+        /**
+         * Keep several chunks in flight, not one.
+         *
+         * Kokoro synthesizes at not much above realtime, so a single chunk of
+         * lookahead gives the next one only as long as the current one takes to
+         * play. Any chunk that runs slower than its predecessor — a longer
+         * sentence, a moment when the language model is also using the CPU —
+         * lands after the audio has already run out, and Buddy falls silent
+         * mid-reply and then carries on. That is the stutter.
+         *
+         * A deeper queue absorbs it: the fast chunks build a cushion the slow
+         * ones spend. Three is enough to cover an outlier without synthesizing
+         * so far ahead that stopping wastes much work — and being cut off is
+         * cheap here anyway, since a discarded chunk is only a blob to free.
+         */
+        const LOOKAHEAD = 3;
+        const inFlight = [];
+        let nextToMake = 0;
+
+        const fill = () => {
+          while (inFlight.length < LOOKAHEAD && nextToMake < chunks.length) {
+            const pending = synthesize(chunks[nextToMake++]);
+            // The awaiting code below still sees the rejection; this only stops
+            // it counting as unhandled while it waits its turn in the queue.
+            pending.catch(() => {});
+            inFlight.push(pending);
+          }
+        };
+        fill();
 
         for (let index = 0; index < chunks.length; index++) {
           let current;
           try {
-            current = await pending;
+            current = await inFlight.shift();
           } catch (error) {
             if (mine === generation && index === 0) throw error;
             // A later chunk failing should not kill what is already playing.
@@ -194,25 +221,23 @@ export function createSpeaker({ onStart, onEnd, onError } = {}) {
           }
           if (mine !== generation) {
             if (current && current.url) URL.revokeObjectURL(current.url);
-            return discard(pending);
+            return inFlight.forEach(discard);
           }
 
-          pending =
-            index + 1 < chunks.length
-              ? synthesize(chunks[index + 1]).catch((error) => {
-                  console.warn('[buddy] could not prepare the next chunk:', error.message);
-                  return null;
-                })
-              : Promise.resolve(null);
+          // Replace what was just taken, so the queue stays full while this plays.
+          fill();
 
-          if (current.system) {
+          if (current && current.system) {
             await speakWithSystemVoice(current.system.text, current.system.voice, mine);
-          } else if (current.url) {
+          } else if (current && current.url) {
             await play(current.url, mine);
           }
-          // Stopped mid-reply: the chunk already being made still has to be freed.
-          if (mine !== generation) return discard(pending);
+          // Stopped mid-reply: whatever is still being made has to be freed.
+          if (mine !== generation) return inFlight.forEach(discard);
         }
+
+        // Nothing should be left, but a chunk made past a break must not leak.
+        inFlight.forEach(discard);
       } catch (error) {
         if (onError) onError(error);
         else console.warn('[buddy] voice reply failed:', error.message);
