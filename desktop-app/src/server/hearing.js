@@ -150,12 +150,31 @@ async function unload() {
   }
 }
 
-/** See builtin.warmUp — `maintain` means "keep it warm", never "load it". */
-async function warmUp(configDir, name, { maintain = false } = {}) {
-  if (maintain && !isLoaded()) return;
+/**
+ * See builtin.warmUp — `maintain` means "keep it warm", never "load it".
+ *
+ * `hold` is the exception, and the ears are the only engine that gets one. It
+ * means the wake word is on and these are needed at any moment: load them even
+ * when cold, and push the idle timer back so they stay.
+ *
+ * Without it the feature eats itself. The ears unload after ten idle minutes,
+ * a maintenance ping refuses to load a cold model, and the only thing that
+ * would load one is a transcription — but the transcription everyone is waiting
+ * for is the wake word itself. So "Hey Buddy" went dead ten minutes after it
+ * was last used, and the next one paid six seconds of model load before Buddy
+ * reacted at all, which from outside is indistinguishable from it being broken.
+ *
+ * The other two engines have no such problem and keep the plain `maintain`
+ * behaviour: nothing needs them until Buddy has already been woken, and their
+ * load overlaps with the user asking their question. They are also the large
+ * ones — several gigabytes against forty megabytes here — so they are where the
+ * memory is worth reclaiming anyway.
+ */
+async function warmUp(configDir, name, { maintain = false, hold = false } = {}) {
+  if (maintain && !hold && !isLoaded()) return;
   const wasLoaded = isLoaded();
   await load(configDir, name);
-  if (!wasLoaded) scheduleIdleUnload();
+  if (hold || !wasLoaded) scheduleIdleUnload();
 }
 
 // ── what counts as having heard something ─────────────────────────────────

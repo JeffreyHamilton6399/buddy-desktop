@@ -848,11 +848,13 @@ async function handleSpeechDownload(req, res) {
  * overlaps the load with the moment the user spends asking their question.
  */
 /**
- * @param {{ maintain?: boolean }} options `maintain` is a periodic keep-warm
- *   ping: it holds on to whatever is already loaded and loads nothing new. See
- *   builtin.warmUp for why the difference matters so much.
+ * @param {{ maintain?: boolean, ears?: boolean }} options `maintain` is a
+ *   periodic keep-warm ping: it holds on to whatever is already loaded and
+ *   loads nothing new. See builtin.warmUp for why the difference matters so
+ *   much. `ears` exempts the transcriber from that, because it is the one
+ *   engine the wake word cannot wait for — see hearing.warmUp.
  */
-async function warmEverything({ maintain = false } = {}) {
+async function warmEverything({ maintain = false, ears = false } = {}) {
   const settings = readSettings();
   const jobs = [];
 
@@ -866,7 +868,7 @@ async function warmEverything({ maintain = false } = {}) {
     jobs.push(voice.warmUp(configDir(), { voice: settings.tts.voice || undefined, maintain }));
   }
   if (providers.usesLocalHearing(settings) && hearing.isReady(configDir(), settings.asr.localModel)) {
-    jobs.push(hearing.warmUp(configDir(), settings.asr.localModel, { maintain }));
+    jobs.push(hearing.warmUp(configDir(), settings.asr.localModel, { maintain, hold: ears }));
   }
 
   // Never let a warm-up failure surface as a request error; the real call will
@@ -876,7 +878,10 @@ async function warmEverything({ maintain = false } = {}) {
 
 async function handleWarm(req, res) {
   const body = await readBody(req).catch(() => ({}));
-  warmEverything({ maintain: body && body.maintain === true }).catch(() => {});
+  warmEverything({
+    maintain: body && body.maintain === true,
+    ears: body && body.ears === true,
+  }).catch(() => {});
   return sendJson(res, 202, {
     warming: {
       chat: builtin.isLoaded(),

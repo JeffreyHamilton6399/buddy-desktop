@@ -827,20 +827,26 @@ export function initOrb() {
    * Keep the engines warm while Buddy is listening, so answering its name is
    * not preceded by a model load.
    *
-   * The heartbeat is deliberately a *maintenance* ping. It holds on to what is
-   * already loaded and never loads anything itself — because an unconditional
-   * one every five minutes outran the server's own idle-unload timers, and the
-   * memory those exist to give back was never given back at all. Once Buddy has
-   * genuinely been unused long enough to unload, it stays unloaded until it is
-   * actually wanted; hearing its name warms it for real, just below.
+   * The heartbeat is deliberately a *maintenance* ping for the brain and the
+   * voice. It holds on to what is already loaded and never loads either itself
+   * — because an unconditional one every five minutes outran the server's own
+   * idle-unload timers, and the memory those exist to give back was never given
+   * back at all. Neither is needed until Buddy has already been woken, and the
+   * load overlaps with the user asking their question.
+   *
+   * The ears are the exception, and `ears: true` is what says so. They are what
+   * hears the wake word, so leaving them cold until something wants them is
+   * circular — the thing that would want them is the wake word, which cannot
+   * happen without them. They are also the small one, so holding them costs
+   * about forty megabytes rather than several gigabytes.
    */
   function keepWarm(on) {
     clearInterval(keepWarmTimer);
     keepWarmTimer = null;
     if (!on) return;
-    api('/warm', {}).catch(() => {});
+    api('/warm', { ears: true }).catch(() => {});
     keepWarmTimer = setInterval(() => {
-      api('/warm', { maintain: true }).catch(() => {});
+      api('/warm', { maintain: true, ears: true }).catch(() => {});
     }, 5 * 60 * 1000);
   }
 
