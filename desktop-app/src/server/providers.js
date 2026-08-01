@@ -318,19 +318,77 @@ function usesBuiltinModel(settings) {
 }
 
 /**
+ * Model names that can look at a picture.
+ *
+ * This list was resisted for a while on the grounds that it would be wrong
+ * within a month, and that is true. It turned out to be the smaller problem.
+ * Without it "cloud" alone meant eyes, so pointing Brain at Groq's
+ * llama-3.3-70b — a text-only model — put a paperclip on the composer and then
+ * answered a picture with `messages[20].content must be a string`, which is a
+ * raw API error about a request the user never knew was being shaped for them.
+ *
+ * Being out of date fails the other way and fails quietly: a new vision model
+ * is not recognised, so the paperclip stays away until a line is added here.
+ * That is a feature briefly missing rather than a feature that visibly breaks,
+ * which is the right way round.
+ */
+const VISION_MODELS = [
+  // OpenAI
+  /gpt-4o/i,
+  /gpt-4\.1/i,
+  /gpt-4-(turbo|vision)/i,
+  /gpt-5/i,
+  // Anthropic — every Claude 3 and later reads images.
+  /claude-3/i,
+  /claude-(opus|sonnet|haiku)-\d/i,
+  // Google
+  /gemini/i,
+  // Meta, on Groq and elsewhere. Llama 4 is multimodal throughout; of Llama 3
+  // only the models with "vision" in the name are.
+  /llama-?4/i,
+  /llama-3\.2-\d+b-vision/i,
+  /scout|maverick/i,
+  // Mistral, xAI, and the open vision models people run through Ollama.
+  /pixtral/i,
+  /grok-\d*-?vision/i,
+  /grok-[4-9]/i,
+  /qwen.*vl/i,
+  /llava/i,
+  /moondream/i,
+  /minicpm-?v/i,
+  /internvl/i,
+  // Ollama drops the hyphen — "gemma3:4b" where the cloud APIs say "gemma-3".
+  /gemma-?3/i,
+];
+
+/** Whichever model id is actually in play for the current chat provider. */
+function activeChatModel(settings) {
+  const chat = settings.chat || {};
+  if (chat.provider === 'cloud') return chat.cloudModel || '';
+  if (chat.provider === 'ollama') return chat.model || '';
+  return '';
+}
+
+/**
  * Can whatever is answering right now look at a picture?
  *
- * This is "worth attempting", not "guaranteed" — whether a cloud or Ollama model
- * has eyes depends on the model, and keeping a whitelist of model names here
- * would be wrong within a month. What it does rule out is the case that can
- * never work: the built-in llama.cpp path, which runs text-only GGUFs and has
- * no image encoder at all, and the bundled z-ai SDK path, which only sends text.
+ * Two gates. The provider has to have an image path at all — which rules out
+ * the built-in llama.cpp engine, running text-only GGUFs with no image encoder,
+ * and the bundled z-ai SDK, which only ever sends text. Then the chosen model
+ * has to be one that reads them, because "supports images" is a property of the
+ * model and not of the company hosting it.
  *
- * Being definite about the "no" is the part that matters. Offering a paperclip
- * that silently does nothing is the failure worth avoiding.
+ * An unrecognised model counts as no. Offering a paperclip that fails on use is
+ * the failure worth avoiding, and a missing button is a question somebody asks
+ * rather than a request that dies at the provider.
  */
 function canSeeImages(settings) {
-  return settings.chat.provider === 'cloud' || settings.chat.provider === 'ollama';
+  const provider = (settings.chat || {}).provider;
+  if (provider !== 'cloud' && provider !== 'ollama') return false;
+
+  const model = activeChatModel(settings);
+  if (!model) return false;
+  return VISION_MODELS.some((pattern) => pattern.test(model));
 }
 
 /** Which capabilities still reach the cloud — used for honest in-app copy. */
@@ -487,6 +545,7 @@ async function probeProviders(settings) {
 module.exports = {
   usesBuiltinModel,
   canSeeImages,
+  activeChatModel,
   usesCloudChat,
   isCloud,
   usesLocalVoice,

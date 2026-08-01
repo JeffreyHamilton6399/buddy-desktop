@@ -1027,10 +1027,19 @@ async function handleChat(req, res) {
   // text-only model, which answers plausibly about an image it never received —
   // the single most confusing way this could fail.
   if (sentImages && !providers.canSeeImages(settings)) {
+    /**
+     * Name the actual reason. "The built-in model reads text only" was the only
+     * explanation this ever gave, and once a text-only *cloud* model could
+     * reach here too it was simply untrue — leaving somebody to go looking in
+     * settings for a switch that was already set the way it said.
+     */
+    const model = providers.activeChatModel(settings);
     return sendJson(res, 400, {
-      error:
-        `${settings.identity.name}'s built-in model reads text only, so it cannot look at pictures. ` +
-        'Switch Brain to a cloud provider, or to an Ollama vision model, and it will see them.',
+      error: model
+        ? `${model} reads text only, so it cannot look at pictures. Choose a model that can see — ` +
+          'Llama 4, GPT-4o, Claude, Gemini or an Ollama vision model — under Brain.'
+        : `${settings.identity.name}'s built-in model reads text only, so it cannot look at pictures. ` +
+          'Switch Brain to a cloud provider, or to an Ollama vision model, and it will see them.',
       cannotSee: true,
     });
   }
