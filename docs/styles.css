@@ -329,7 +329,7 @@ code {
 
 /* ── four-up feature row ─────────────────────────────────────────────────── */
 
-.four {
+.cards {
   display: grid;
   gap: 30px 36px;
 }
@@ -654,7 +654,7 @@ tbody tr:last-child td {
 /* ── wider screens: use them ─────────────────────────────────────────────── */
 
 @media (min-width: 720px) {
-  .four {
+  .cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .downloads {
@@ -675,8 +675,8 @@ tbody tr:last-child td {
     grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
     gap: 64px;
   }
-  .four {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  .cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .split {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
