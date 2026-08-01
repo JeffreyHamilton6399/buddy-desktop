@@ -1334,13 +1334,40 @@ async function handleChat(req, res) {
    */
   const actionResult = body.actionResult && typeof body.actionResult === 'object' ? body.actionResult : null;
 
-  if (!incoming.length && !actionResult) {
+  /**
+   * "Answer that again."
+   *
+   * The turn is not repeated, it is *replaced*: the assistant's last reply is
+   * taken off the end of the conversation and the same question is put back to
+   * the model. Appending the question a second time instead would leave the
+   * transcript reading as though the user asked twice and would feed the
+   * rejected answer back in as context for its own replacement — which is how
+   * a retry ends up producing a paraphrase of the thing being retried.
+   */
+  const retry = body.retry === true;
+
+  if (!incoming.length && !actionResult && !retry) {
     return sendJson(res, 400, { error: 'messages must be a non-empty array' });
   }
 
   const settings = readSettings();
   await history.load();
   const conversation = history.resolve(body.sessionId);
+
+  if (retry) {
+    // Anything an action put there goes too, or the model is handed the result
+    // of a call it is no longer making.
+    while (
+      conversation.messages.length &&
+      (conversation.messages[conversation.messages.length - 1].role === 'assistant' ||
+        conversation.messages[conversation.messages.length - 1].kind === 'action')
+    ) {
+      conversation.messages.pop();
+    }
+    if (!conversation.messages.length) {
+      return sendJson(res, 400, { error: 'there is nothing to answer again' });
+    }
+  }
 
   let added = 0;
   let sentImages = 0;
@@ -1365,7 +1392,11 @@ async function handleChat(req, res) {
   // Every message was blank. This is what a transcription of silence looks like
   // by the time it reaches here, and it is a bad request rather than a failure
   // of the model — which would otherwise throw with nothing to reply to.
-  if (!added) {
+  //
+  // A retry adds nothing on purpose: the question it is answering again is
+  // already the last thing in the conversation, which is exactly why it must
+  // not be appended a second time.
+  if (!added && !retry) {
     return sendJson(res, 400, { error: 'There was nothing to reply to.', empty: true });
   }
 
@@ -2287,6 +2318,9 @@ module.exports = {
   start,
   readConfig,
   readSettings,
+  // The main process performs set_name, and this is the only path that writes
+  // settings — going round it would skip normalisation and the cache.
+  writeSettings,
   isConfigured,
   activeModelId,
   configPath,
