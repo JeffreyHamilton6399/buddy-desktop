@@ -605,6 +605,14 @@ export function initOrb() {
       showToast(`Couldn't: ${(result && result.error) || 'unknown'}`.slice(0, 60), true, 4000);
     }
 
+    /**
+     * Nothing more to say about a page that opened. Buddy already said it was
+     * opening it, and going back to the model would only produce a second
+     * sentence saying the same thing — spoken aloud, one after the other.
+     * Reading and listing do have something to report, and so does a failure.
+     */
+    if (result && result.ok && !payload.action.feedsBack) return '';
+
     try {
       const followUp = await api('/chat', {
         sessionId: activeChatId,

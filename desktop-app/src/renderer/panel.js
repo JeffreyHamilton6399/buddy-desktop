@@ -469,6 +469,20 @@ export function initPanel() {
       const result = await runOneAction(current.action);
       if (!result) return;
 
+      /**
+       * Only go back to the model when it has something to gain by hearing.
+       *
+       * Reading a file or listing a folder produces the answer to the question
+       * that prompted it, so those always go back. Opening a page does not:
+       * the page is open, Buddy has already said it is opening it, and asking
+       * the model to react to "it worked" costs a second round trip to be told
+       * "I've opened it" in a bubble underneath the one that said so.
+       *
+       * A failure always goes back whatever the action was, because the model
+       * is the only thing that can explain it or try something else.
+       */
+      if (result.ok && !current.action.feedsBack) return;
+
       // The follow-up is a whole turn of its own: the model sees the result and
       // writes a real answer, which streams into the panel like any other.
       const typingRow = addTyping();

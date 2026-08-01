@@ -150,10 +150,13 @@ const ACTIONS = {
       const query = String(argument || '').trim();
       if (!query) return { ok: false, error: 'there was nothing to search for' };
       if (query.length > 300) return { ok: false, error: 'that search is too long' };
-      return { ok: true, value: `https://duckduckgo.com/?q=${encodeURIComponent(query)}` };
+      return { ok: true, value: searchUrl(query) };
     },
-    describe: (value) => `search for “${decodeURIComponent(value.split('q=')[1] || '')}”`,
-    describeDone: (value) => `Searched for “${decodeURIComponent(value.split('q=')[1] || '')}”`,
+    // Shared with open_url, which can also end in a search. Splitting on "q="
+    // by hand was its own small bug waiting to happen: a search containing that
+    // string would have been decoded from the wrong place.
+    describe: (value) => `search for “${searchTerms(value)}”`,
+    describeDone: (value) => `Searched for “${searchTerms(value)}”`,
   },
 
   open_folder: {
@@ -176,6 +179,8 @@ const ACTIONS = {
   read_file: {
     summary: 'read a file',
     needsFiles: true,
+    // Its whole purpose is to hand something back to the model.
+    feedsBack: true,
     validate(argument, context) {
       const found = files.resolveWithin(context.readRoots, argument);
       if (!found.ok) return { ok: false, error: found.error };
@@ -188,6 +193,7 @@ const ACTIONS = {
   list_folder: {
     summary: 'list a folder',
     needsFiles: true,
+    feedsBack: true,
     validate(argument, context) {
       // "." and "" both mean "the folder you shared with me", which is what a
       // model reaches for when asked what files there are.
@@ -389,6 +395,9 @@ function actionFromToolCall(name, args, context = {}) {
       ...(checked.append ? { append: true } : {}),
       description: definition.describe(checked.value),
       done: definition.describeDone(checked.value),
+      // Whether the result is something the model has to see; see the loop
+      // in the renderer, which only takes another turn when it is.
+      ...(definition.feedsBack ? { feedsBack: true } : {}),
     },
     refused: null,
   };
@@ -669,6 +678,9 @@ function extractAction(reply, context = {}) {
       // "about to" and "just did" read very differently in a transcript.
       description: definition.describe(checked.value),
       done: definition.describeDone(checked.value),
+      // Whether the result is something the model has to see; see the loop
+      // in the renderer, which only takes another turn when it is.
+      ...(definition.feedsBack ? { feedsBack: true } : {}),
     },
     refused: null,
   };

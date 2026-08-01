@@ -1342,7 +1342,22 @@ async function handleChat(req, res) {
    * Everything else keeps the markers, and so does a cloud model that ignores
    * the tools and writes one anyway: the reply is parsed either way.
    */
-  const useTools = wantsAction && settings.chat.provider === 'cloud';
+  /**
+   * Not on the turn that carries a result back, though.
+   *
+   * A tool call is a two-part exchange in the protocol: the assistant's call,
+   * then a `tool` message answering it. Buddy does not keep the call — the
+   * action is performed by the main process and only its text is stored — so
+   * the result comes back as an ordinary user message instead. Offering tools
+   * alongside that is contradictory: the model sees a result for a call it has
+   * no record of making, and sometimes decides it has not read the file yet and
+   * calls again. Measured at one in three, which is often enough to look broken.
+   *
+   * With tools withheld for that one turn, the result is simply text to answer
+   * from — which is exactly what it is — and the marker instructions come back
+   * in case a further action is genuinely wanted.
+   */
+  const useTools = wantsAction && settings.chat.provider === 'cloud' && !actionResult;
   const tools = useTools ? actions.toolsFor(permissions) : null;
 
   const withClock = `${clockLine()}\n\n${basePrompt}`;
