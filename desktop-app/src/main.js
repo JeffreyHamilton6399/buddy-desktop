@@ -14,6 +14,7 @@ const {
   Tray,
   Menu,
   ipcMain,
+  globalShortcut,
   screen,
   protocol,
   session,
@@ -455,6 +456,64 @@ function hidePanel() {
   if (panelWindow && !panelWindow.isDestroyed()) panelWindow.hide();
 }
 
+/**
+ * Keys that work from anywhere, including over a full-screen window.
+ *
+ * The wake word is the only hands-free way in, and it depends on the room, the
+ * microphone, the Bluetooth link and Whisper all behaving at once. On the
+ * hardware this was tested against, several of those were not behaving, and the
+ * result was an assistant that could not be summoned or silenced without
+ * hunting for a 96-pixel circle behind whatever else was open.
+ *
+ * A shortcut has none of those dependencies. Both are deliberately awkward
+ * three-key combinations, because a global shortcut is taken away from every
+ * other program on the machine and a common one would be theft.
+ */
+const SHORTCUTS = {
+  // Summon: opens the panel and puts the cursor in the box.
+  'CommandOrControl+Shift+Space': () => {
+    showPanel();
+    if (panelWindow && !panelWindow.isDestroyed()) {
+      panelWindow.focus();
+      panelWindow.webContents.send('buddy:focus-composer');
+    }
+  },
+  // Shut up: the one that has to work while Buddy is talking over you.
+  // The key is written as the character. Electron has no "Period" key name and
+  // throws on one, which is how this first shipped and took the app down with
+  // it — see registerShortcuts.
+  'CommandOrControl+Shift+.': () => {
+    eachRenderer((window) => window.webContents.send('buddy:silence'));
+  },
+};
+
+/**
+ * Claim the shortcuts, and never let that be fatal.
+ *
+ * Two separate ways this goes wrong, and only one of them is a return value.
+ * `register` answers false when another program already owns the combination —
+ * that is somebody else's key and none of our business. But it *throws* on an
+ * accelerator it cannot parse, and accelerator support varies by platform, so
+ * a string that is fine on Windows can be a crash on Linux. Since this runs
+ * inside the startup path, an unguarded throw is not a missing shortcut: it is
+ * an app that will not open at all.
+ *
+ * A convenience key is never worth that, so each one is claimed on its own and
+ * a failure costs only itself. The tray, the orb and the wake word are all
+ * still there.
+ */
+function registerShortcuts() {
+  for (const [accelerator, handler] of Object.entries(SHORTCUTS)) {
+    try {
+      if (!globalShortcut.register(accelerator, handler)) {
+        console.warn(`[buddy] could not register ${accelerator} — another program has it`);
+      }
+    } catch (error) {
+      console.warn(`[buddy] could not register ${accelerator} — ${error.message}`);
+    }
+  }
+}
+
 function togglePanel() {
   if (panelWindow && !panelWindow.isDestroyed() && panelWindow.isVisible()) hidePanel();
   else showPanel();
@@ -525,7 +584,29 @@ function identity() {
 function buildTrayMenu() {
   const { name } = identity();
   return Menu.buildFromTemplate([
-    { label: `Open ${name}`, click: () => showPanel() },
+    /**
+     * The accelerators are shown, not registered — globalShortcut already owns
+     * these, and letting the menu claim them too would be two owners for one
+     * key. `registerAccelerator: false` is what separates "display this" from
+     * "handle this".
+     *
+     * They are here because otherwise they are invisible. A shortcut nobody
+     * knows about is a shortcut nobody uses, and this menu is the one place
+     * somebody already goes looking when they cannot find Buddy.
+     */
+    {
+      label: `Open ${name}`,
+      accelerator: 'CommandOrControl+Shift+Space',
+      registerAccelerator: false,
+      click: () => showPanel(),
+    },
+    {
+      label: 'Stop talking',
+      accelerator: 'CommandOrControl+Shift+.',
+      registerAccelerator: false,
+      click: () => eachRenderer((window) => window.webContents.send('buddy:silence')),
+    },
+    { type: 'separator' },
     {
       label: 'Wake word: ' + (wakeEnabled ? 'On' : 'Off'),
       type: 'checkbox',
@@ -660,6 +741,13 @@ function registerIpc() {
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
   });
   ipcMain.on('buddy:open-config-folder', () => shell.openPath(app.getPath('userData')));
+
+  // Copying a reply. Capped rather than unbounded: this arrives from a renderer
+  // and there is no reason for a message to be larger than a long answer.
+  ipcMain.on('buddy:copy-text', (_event, text) => {
+    if (typeof text !== 'string' || !text) return;
+    require('electron').clipboard.writeText(text.slice(0, 100000));
+  });
 
   /**
    * A picture of what the user is looking at.
@@ -838,6 +926,49 @@ function registerIpc() {
       return { ok: true };
     }
 
+    /**
+     * Renaming itself.
+     *
+     * Performed here rather than in the server's request handler for the same
+     * reason every other action is: the server decides what was asked for, the
+     * main process is the only thing that changes anything, and it re-checks
+     * rather than trusting the message it was handed.
+     *
+     * The wake word follows the name, but only when it was still built out of
+     * the old one. Somebody who deliberately set "computer" as the phrase for
+     * an assistant called Ada meant it, and having a rename quietly overwrite
+     * that would be the sort of helpfulness nobody asked for.
+     */
+    if (name === 'set_name') {
+      const { readSettings, writeSettings } = require('./server/server.js');
+      const settings = readSettings();
+      const wanted = value.trim();
+      if (!wanted) return { ok: false, error: 'no name was given' };
+
+      const was = settings.identity.name;
+      const phrase = settings.identity.wakeWord || '';
+      // Word-boundary, case-insensitive, first occurrence only.
+      const escaped = was.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const carries = new RegExp(`\\b${escaped}\\b`, 'i');
+      const wakeWord = carries.test(phrase) ? phrase.replace(carries, wanted) : phrase;
+
+      try {
+        await writeSettings({ identity: { name: wanted, wakeWord } });
+      } catch (error) {
+        return { ok: false, error: `it could not save the new name (${error.message})` };
+      }
+
+      // Both windows name Buddy in their chrome, and the tray menu does too.
+      applyOrbSize(readOrbSizeSetting());
+      refreshTray();
+      eachRenderer((window) => window.webContents.send('buddy:runtime-changed'));
+
+      return {
+        ok: true,
+        detail: wakeWord && wakeWord !== phrase ? `Say “${wakeWord}” from now on.` : '',
+      };
+    }
+
     return { ok: false, error: `Buddy cannot do "${name}".` };
   });
 
@@ -890,6 +1021,23 @@ function registerIpc() {
       note: typeof entry.note === 'string' ? entry.note.slice(0, 120) : '',
     });
     recentlyHeard.length = Math.min(recentlyHeard.length, 8);
+
+    /**
+     * Also to the terminal, not only to the panel.
+     *
+     * The panel's list is the right place for a user, but it is no use to
+     * anybody debugging this over a log — and a wake word that is not firing is
+     * precisely when somebody is reading one. This is the line that separates
+     * "the microphone never opened" from "it heard you and wrote down
+     * something else".
+     */
+    const entryLine = recentlyHeard[0];
+    console.log(
+      `[buddy] heard ${entryLine.seconds.toFixed(1)}s of ${entryLine.kind}: ` +
+        `${entryLine.text ? JSON.stringify(entryLine.text) : '(nothing transcribed)'}` +
+        `${entryLine.kind === 'wake' ? ` → ${entryLine.matched ? 'MATCHED' : 'no match'}` : ''}` +
+        `${entryLine.note ? ` (${entryLine.note})` : ''}`
+    );
   });
 
   ipcMain.handle('buddy:get-heard', () => recentlyHeard);
@@ -988,6 +1136,7 @@ if (!app.requestSingleInstanceLock()) {
         createOrbWindow();
         createPanelWindow();
         createTray();
+        registerShortcuts();
       }
     } catch (error) {
       fatal(error);
@@ -1006,8 +1155,12 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   // A crash or a kill cannot be helped, but every exit we do control should
-  // leave the notification area as it found it.
-  app.on('will-quit', destroyTray);
+  // leave the notification area as it found it — and hand the keys back, which
+  // Electron does on quit anyway but not if the process is told to reload.
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+    destroyTray();
+  });
   process.on('exit', destroyTray);
 
   app.on('activate', () => {

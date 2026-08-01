@@ -447,7 +447,19 @@ export function initOrb() {
       ? Math.hypot(event.screenX - pressOrigin.x, event.screenY - pressOrigin.y)
       : Infinity;
     // A short press that barely moved was a click, not a drag.
-    if (travelled < 5 && Date.now() - pressedAt < 450) window.buddy.requestOpenPanel();
+    if (travelled < 5 && Date.now() - pressedAt < 450) {
+      /**
+       * Mid-sentence, a click means "be quiet" — not "open the panel".
+       *
+       * Cutting Buddy off had exactly one route before this, and it was voice,
+       * which meant that on hardware where the barge-in bar was out of reach
+       * there was no way to stop it at all: clicking the orb opened a window
+       * over your work while it carried on talking underneath. A pointer is
+       * the one input that always works, so it is the one that should always
+       * be able to shut it up.
+       */
+      if (!silence()) window.buddy.requestOpenPanel();
+    }
     pressOrigin = null;
   }
 
@@ -526,18 +538,89 @@ export function initOrb() {
   }
 
   /**
+   * Stop talking, and do nothing else.
+   *
+   * What a click on the orb means while Buddy is mid-sentence. Distinct from
+   * interruptSpeech below, which opens a question window because the user was
+   * already speaking — somebody who reached for the mouse has said nothing, and
+   * dropping them into a listening window they did not ask for would just sit
+   * there for seven seconds.
+   */
+  function silence() {
+    if (!speaker.speaking) return false;
+    bargeSince = 0;
+    interrupted = true;
+    speaker.stop();
+    if (inFlight) {
+      inFlight.abort();
+      inFlight = null;
+    }
+    hideToast();
+    backToWaiting();
+    return true;
+  }
+
+  /**
+   * What the microphone hears while Buddy is talking — which is mostly Buddy.
+   *
+   * A *low* percentile, not an average: if somebody is talking over the top,
+   * the loud frames are theirs, and what this wants is the level of Buddy
+   * alone. Sampled over about a second at 32ms a frame.
+   */
+  const echoWindow = [];
+  const ECHO_FRAMES = 40;
+  const ECHO_PERCENTILE = 0.25;
+  const ECHO_MARGIN = 1.8;
+
+  function noteEcho(rms) {
+    echoWindow.push(rms);
+    if (echoWindow.length > ECHO_FRAMES) echoWindow.shift();
+  }
+
+  function echoLevel() {
+    if (echoWindow.length < 8) return null; // not yet measured
+    const sorted = [...echoWindow].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length * ECHO_PERCENTILE)];
+  }
+
+  /**
+   * How loud someone has to be to cut in.
+   *
+   * This used to be a flat multiple of the ordinary trigger, on the reasoning
+   * that the microphone hears Buddy through the speakers and the bar has to
+   * clear that. True on open speakers. On a headset it is nonsense: Buddy's
+   * voice goes into the user's ears and never reaches the microphone at all,
+   * so the bar sat far above anything a person could produce and cutting in
+   * simply did not work — the more so with a Bluetooth headset, whose automatic
+   * gain control squashes the distance between quiet and loud that a fixed
+   * multiplier depends on.
+   *
+   * So measure the echo instead of assuming it. When the microphone can hear
+   * Buddy, the bar rises above it and self-interruption stays impossible; when
+   * it cannot, the bar falls back to ordinary speech and talking over Buddy
+   * works the way it does with a person. Until there are enough frames to
+   * judge, it assumes speakers, because a Buddy that interrupts itself is worse
+   * than one that takes another moment to become interruptible.
+   */
+  function bargeInBar() {
+    const ordinary = detector.trigger;
+    const echo = echoLevel();
+    if (echo === null) return ordinary * BARGE_IN_BOOST;
+    return Math.max(ordinary, echo * ECHO_MARGIN);
+  }
+
+  /**
    * Watch for a voice over the top of Buddy's own.
    *
-   * The microphone hears Buddy through the speakers, so this runs against a
-   * much higher bar than ordinary speech detection and wants a sustained run
-   * rather than a single loud frame. Both are deliberately conservative: being
-   * cut off by a cough is worse than having to say "Hey Buddy" twice.
+   * Wants a sustained run rather than a single loud frame: being cut off by a
+   * cough is worse than having to say "Hey Buddy" twice.
    */
   function considerBargeIn(rms, now = Date.now()) {
     // Only ever cuts short a greeting or an answer. Anything else that manages
     // to be speaking is not something to interrupt into a question window.
     if (mode !== 'busy' || !detector || !detector.calibrated) return;
-    if (rms < detector.trigger * BARGE_IN_BOOST) {
+    noteEcho(rms);
+    if (rms < bargeInBar()) {
       bargeSince = 0;
       return;
     }
@@ -1005,6 +1088,13 @@ export function initOrb() {
   }
 
   window.buddy.onWakeToggled((enabled) => applyWakePreference(enabled));
+
+  /**
+   * The silence shortcut. Goes through the same path as a click on the orb, so
+   * the answer stops, the generation behind it is called off, and the orb drops
+   * back to waiting rather than into a listening window nobody asked for.
+   */
+  window.buddy.onSilence(() => silence());
 
   window.buddy.onPanelVisibility((visible) => {
     panelVisible = Boolean(visible);
