@@ -162,27 +162,29 @@ export function initPanel() {
   const screenButton = $('see-screen');
 
   /**
-   * The paperclip and the screen button, when the brain has no eyes.
+   * The paperclip and the screen button, which exist only when the brain has
+   * eyes.
    *
-   * These used to be hidden outright, which is why "show Buddy your screen"
-   * read as a feature that had stopped working: a control that is not there
-   * gives you nothing to ask about, and nothing to fix. They stay visible and
-   * disabled instead, and say what would make them work.
+   * Gone rather than greyed out. Unlike the microphone below — which is off
+   * because of a setting you can turn back on, so a disabled button is a
+   * pointer to it — a brain with no vision cannot be talked round. Leaving two
+   * permanently dead controls in the composer would be clutter that never
+   * resolves, so the row simply carries what Buddy can currently do.
    *
-   * Which is a real answer, not a shrug — the built-in llama.cpp engine cannot
-   * see at all, so the fix is always to change the brain rather than to hunt
-   * for a setting.
+   * Both are restored the moment a model that can see is selected, since this
+   * runs again on every runtime change.
    */
   function applyVisionAvailability() {
     const blind = runtime.canSee === false;
-    const why = 'needs a brain that can see — an Ollama vision model, or a cloud provider (Settings → Brain)';
 
-    attachButton.hidden = false;
-    screenButton.hidden = false;
-    attachButton.disabled = blind;
-    screenButton.disabled = blind;
-    attachButton.title = blind ? `Adding a picture ${why}` : 'Add a picture';
-    screenButton.title = blind ? `Showing ${buddyName()} your screen ${why}` : `Show ${buddyName()} your screen`;
+    attachButton.hidden = blind;
+    screenButton.hidden = blind;
+    // Cleared explicitly: a button that was disabled while hidden would come
+    // back visible and dead.
+    attachButton.disabled = false;
+    screenButton.disabled = false;
+    attachButton.title = 'Add a picture';
+    screenButton.title = `Show ${buddyName()} your screen`;
 
     if (blind && pending.length) {
       pending = [];
