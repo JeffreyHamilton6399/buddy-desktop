@@ -14,6 +14,7 @@ import {
   wakePhrase,
   refreshRuntime,
   renderMarkdown,
+  streamChat,
   voiceInputAvailable,
 } from './core.js';
 import { openMicrophone, createVoiceDetector, samplesToBase64 } from './capture.js';
@@ -344,8 +345,35 @@ export function initPanel() {
 
     const typingRow = addTyping();
 
+    /**
+     * The typing dots become the reply.
+     *
+     * Reusing the bubble rather than removing it and adding another means the
+     * first words appear exactly where the dots were, with nothing jumping.
+     * Rendering is coalesced onto a frame because deltas can arrive a few
+     * characters at a time and re-parsing the markdown for each one is work
+     * nobody sees.
+     */
+    const liveBubble = typingRow.querySelector('.bubble');
+    let live = '';
+    let painting = false;
+
+    const paint = () => {
+      painting = false;
+      liveBubble.innerHTML = renderMarkdown(live);
+      scrollToEnd();
+    };
+
+    const onDelta = (piece) => {
+      if (!piece) return;
+      live += piece;
+      if (painting) return;
+      painting = true;
+      requestAnimationFrame(paint);
+    };
+
     try {
-      const payload = await api('/chat', { messages: [{ role: 'user', content, images }], sessionId });
+      const payload = await streamChat({ messages: [{ role: 'user', content, images }], sessionId }, { onDelta });
       typingRow.remove();
       setSession(payload.sessionId || sessionId);
       addMessage('buddy', payload.reply, { markdown: true });

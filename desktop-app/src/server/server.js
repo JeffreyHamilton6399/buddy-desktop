@@ -402,6 +402,69 @@ function applyCors(req, res) {
   res.setHeader('Vary', 'Origin');
 }
 
+/**
+ * How much of a part-written reply is safe to show.
+ *
+ * A streamed reply arrives a few characters at a time, and some of those
+ * characters are machinery the user must never see: an action marker is
+ * stripped out of the final text, so streaming it raw would flash
+ * `[[open_url: https://…]]` on screen and then take it away again. The same
+ * goes for a model that thinks out loud in <think> tags.
+ *
+ * So everything from an unfinished marker or an unclosed think block onwards is
+ * withheld until it closes, at which point it either disappears (it was
+ * machinery) or is released in one go. A lone trailing `[` is held back too,
+ * since the next character may be the one that makes it a marker.
+ */
+/**
+ * Which brains can stream. Ollama and the bundled z-ai SDK answer in one piece
+ * here, so asking them to stream would be a promise this cannot keep — the
+ * caller falls back to waiting for the whole reply, which is what it did
+ * before.
+ */
+function streamableProvider(settings) {
+  return settings.chat.provider === 'builtin' || settings.chat.provider === 'cloud';
+}
+
+/** Everything that means "what follows is machinery, not speech". */
+const MACHINERY = ['[[', '<think>', '<thinking>', '<reasoning>', '</think>', '</thinking>', '</reasoning>'];
+
+/**
+ * How many characters at the end might be the beginning of machinery.
+ *
+ * A stream arrives a character at a time, so `<think>` is preceded by `<`,
+ * `<t`, `<th` and so on — none of which match anything, all of which would be
+ * printed and then snatched back the moment the tag completed. Anything that
+ * could still turn into a marker is held for one more character.
+ */
+function trailingPartial(text) {
+  const longest = Math.max(...MACHINERY.map((token) => token.length)) - 1;
+  for (let length = Math.min(longest, text.length); length > 0; length--) {
+    const tail = text.slice(-length).toLowerCase();
+    if (MACHINERY.some((token) => token.startsWith(tail))) return length;
+  }
+  return 0;
+}
+
+function visibleSoFar(raw) {
+  let text = String(raw || '');
+  // Complete machinery, wherever it sits.
+  text = text.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '');
+  text = text.replace(/\[\[[\s\S]*?\]\]/g, '');
+  // Machinery that has started and not finished. Only the earliest matters —
+  // everything after it is inside the unclosed block.
+  const openers = [text.search(/<(think|thinking|reasoning)>/i), text.indexOf('[[')].filter((at) => at !== -1);
+  if (openers.length) text = text.slice(0, Math.min(...openers));
+  // And machinery that has not finished starting.
+  const partial = trailingPartial(text);
+  return partial ? text.slice(0, -partial) : text;
+}
+
+/** One newline-delimited JSON event on an open response. */
+function sendEvent(res, event) {
+  res.write(JSON.stringify(event) + '\n');
+}
+
 function sendJson(res, status, payload) {
   const body = Buffer.from(JSON.stringify(payload));
   res.writeHead(status, {
@@ -1085,6 +1148,69 @@ async function handleChat(req, res) {
   const messages = [{ role: 'system', content: prompt }, ...context];
 
   let completion;
+  /**
+   * Streaming, when the caller asked and the provider can.
+   *
+   * The response becomes newline-delimited JSON rather than one object: any
+   * number of `delta` events, then exactly one `done` carrying precisely what
+   * the non-streaming reply would have carried. A client that does not ask for
+   * it sees no change at all.
+   *
+   * Only the text is streamed. The action, the session and the saved history
+   * are all decided after the last token, because a marker cannot be parsed
+   * until it is complete and half of one is not an instruction.
+   */
+  const wantsStream = body.stream === true && streamableProvider(settings);
+
+  /**
+   * The header is written on the first thing actually sent, not here.
+   *
+   * Several checks below still answer with a plain status — the model is not
+   * downloaded, the provider has no key — and those come after this point.
+   * Committing to 200 up front would make every one of them a crash instead of
+   * an error message.
+   */
+  let streamOpen = false;
+  const beginStream = () => {
+    if (streamOpen) return;
+    streamOpen = true;
+    /**
+     * Nagle's algorithm has to go, or streaming is slower than not streaming.
+     *
+     * Each delta is a small write, and Nagle holds a small write back waiting
+     * for more to coalesce with while the far end's delayed ACK waits for data
+     * — so the two sit waiting for each other and every token costs about
+     * 150ms. Measured here before this line: a reply the model generated in
+     * 2.7s took 15s to deliver. The generation was never the problem.
+     */
+    if (res.socket && typeof res.socket.setNoDelay === 'function') res.socket.setNoDelay(true);
+    res.writeHead(200, {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-store',
+      // Nothing between here and the renderer should be holding this back.
+      'X-Accel-Buffering': 'no',
+    });
+  };
+
+  let shown = '';
+  const emit = (raw) => {
+    if (!wantsStream) return;
+    const visible = visibleSoFar(raw);
+    if (visible.length <= shown.length) return;
+    beginStream();
+    sendEvent(res, { type: 'delta', text: visible.slice(shown.length) });
+    shown = visible;
+  };
+
+  /** Accumulates the raw reply so each delta can be measured against the whole. */
+  let streamed = '';
+  const onDelta = wantsStream
+    ? (piece) => {
+        streamed += piece;
+        emit(streamed);
+      }
+    : undefined;
+
   if (settings.chat.provider === 'builtin') {
     const modelId = activeModelId(settings);
     if (!modelStore.isReady(configDir(), modelId)) {
@@ -1098,6 +1224,7 @@ async function handleChat(req, res) {
       modelPath: modelStore.modelPath(configDir(), modelId),
       messages,
       maxTokens: spoken ? VOICE_REPLY_TOKENS : undefined,
+      onDelta,
     });
   } else if (settings.chat.provider === 'ollama') {
     completion = await providers.ollamaChat({
@@ -1118,6 +1245,7 @@ async function handleChat(req, res) {
       model: settings.chat.cloudModel,
       messages,
       maxTokens: spoken ? VOICE_REPLY_TOKENS : CLOUD_REPLY_TOKENS,
+      onDelta,
     });
   } else {
     const zai = await getZai();
@@ -1144,14 +1272,26 @@ async function handleChat(req, res) {
   if (parsed.action) console.log(`[buddy] action requested: ${parsed.action.name} → ${parsed.action.value}`);
   if (parsed.refused) console.warn(`[buddy] ${parsed.refused}`);
 
-  return sendJson(res, 200, {
+  const answer = {
     reply,
     sessionId: conversation.id,
     title: conversation.title,
     saved: settings.saveHistory,
     action: parsed.action,
     actionRefused: parsed.refused,
-  });
+  };
+
+  if (wantsStream) {
+    // The reply is sent in full rather than as a last delta. Streaming shows a
+    // near-enough version — machinery withheld, markers removed — and this is
+    // the authoritative text, so the client replaces rather than appends and
+    // any difference between the two resolves in favour of this one.
+    beginStream();
+    sendEvent(res, { type: 'done', ...answer });
+    return res.end();
+  }
+
+  return sendJson(res, 200, answer);
 }
 
 /**
@@ -1490,6 +1630,15 @@ async function router(req, res) {
     if (!res.headersSent) {
       sendJson(res, isMissingConfig ? 500 : status, { error: message, needsSetup: Boolean(isMissingConfig) });
     } else {
+      // A stream that has already started cannot become a status code, so the
+      // failure is delivered as its last event. Without this the connection
+      // simply ends and the client is left holding half an answer with no way
+      // to tell a finished reply from a broken one.
+      try {
+        res.write(JSON.stringify({ type: 'error', error: message }) + '\n');
+      } catch {
+        /* the socket has gone; nothing left to say */
+      }
       res.end();
     }
   }

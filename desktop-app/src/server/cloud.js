@@ -88,6 +88,54 @@ function readError(status, body) {
   return `The provider returned ${status}${detail ? `: ${detail}` : ''}`;
 }
 
+/**
+ * Server-sent events, which is how every one of these providers streams.
+ *
+ * The wire format is the same even though what rides on it is not: blank-line
+ * separated records, each a set of `field: value` lines, and only the `data:`
+ * ones matter here. A record can be split across TCP reads at any point, so the
+ * buffer is only consumed as far as the last complete blank line.
+ *
+ * @param {(data: string) => void} onData one `data:` payload, still unparsed
+ */
+async function postSse(url, { headers, body, onData, timeoutMs = REQUEST_TIMEOUT_MS }) {
+  const { signal, done } = withTimeout(timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...headers },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error(readError(response.status, await response.text().catch(() => '')));
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for await (const chunk of response.body) {
+      buffer += decoder.decode(chunk, { stream: true });
+
+      let split;
+      while ((split = buffer.indexOf('\n\n')) !== -1) {
+        const record = buffer.slice(0, split);
+        buffer = buffer.slice(split + 2);
+        for (const line of record.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          // OpenAI's end-of-stream sentinel. Anthropic just stops.
+          if (payload && payload !== '[DONE]') onData(payload);
+        }
+      }
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('The provider did not respond in time.');
+    throw error;
+  } finally {
+    done();
+  }
+}
+
 async function post(url, { headers, body, timeoutMs = REQUEST_TIMEOUT_MS }) {
   const { signal, done } = withTimeout(timeoutMs);
   try {
@@ -110,6 +158,64 @@ async function post(url, { headers, body, timeoutMs = REQUEST_TIMEOUT_MS }) {
 }
 
 // ── the OpenAI /chat/completions shape ────────────────────────────────────
+
+async function openAiChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta }) {
+  let text = '';
+  await postSse(`${baseUrl}/chat/completions`, {
+    headers: keys.authHeaders('openai', apiKey),
+    body: {
+      model,
+      messages: messages.map((message) => ({ role: message.role, content: openAiContent(message) })),
+      stream: true,
+      ...(Number.isFinite(maxTokens) && maxTokens > 0 ? { max_tokens: maxTokens } : {}),
+    },
+    onData: (data) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        return; // a keep-alive or a comment; nothing to add
+      }
+      const delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+      const piece = delta && typeof delta.content === 'string' ? delta.content : '';
+      if (!piece) return;
+      text += piece;
+      onDelta(piece);
+    },
+  });
+  return { message: { role: 'assistant', content: text.trim() } };
+}
+
+async function anthropicChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta }) {
+  const { system, conversation } = splitAnthropic(messages);
+  let text = '';
+  await postSse(`${baseUrl}/messages`, {
+    headers: keys.authHeaders('anthropic', apiKey),
+    body: {
+      model,
+      max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : ANTHROPIC_MAX_TOKENS,
+      ...(system ? { system } : {}),
+      messages: conversation,
+      stream: true,
+    },
+    onData: (data) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        return;
+      }
+      // Anthropic narrates the whole message structure; only the text deltas
+      // of a content block carry anything to show.
+      if (parsed.type !== 'content_block_delta') return;
+      const piece = parsed.delta && typeof parsed.delta.text === 'string' ? parsed.delta.text : '';
+      if (!piece) return;
+      text += piece;
+      onDelta(piece);
+    },
+  });
+  return { message: { role: 'assistant', content: text.trim() } };
+}
 
 async function openAiChat({ baseUrl, apiKey, model, messages, maxTokens }) {
   const payload = await post(`${baseUrl}/chat/completions`, {
@@ -137,17 +243,27 @@ async function openAiChat({ baseUrl, apiKey, model, messages, maxTokens }) {
  * sent: the current Claude models reject `temperature` outright, so passing one
  * would turn every request into a 400.
  */
-async function anthropicChat({ baseUrl, apiKey, model, messages }) {
+/**
+ * Anthropic takes the system prompt as its own field rather than as a turn, so
+ * the message list has to be pulled apart before it is sent. Shared by the
+ * streaming and non-streaming paths, which must agree about this exactly.
+ */
+function splitAnthropic(messages) {
   const system = messages
     .filter((message) => message.role === 'system')
     .map((message) => message.content)
     .join('\n\n');
 
-  const turns = messages
+  const conversation = messages
     .filter((message) => message.role === 'user' || message.role === 'assistant')
     .map((message) => ({ role: message.role, content: anthropicContent(message) }));
 
-  if (!turns.length) throw new Error('There was no message to send.');
+  if (!conversation.length) throw new Error('There was no message to send.');
+  return { system, conversation };
+}
+
+async function anthropicChat({ baseUrl, apiKey, model, messages }) {
+  const { system, conversation: turns } = splitAnthropic(messages);
 
   const payload = await post(`${baseUrl}/messages`, {
     headers: keys.authHeaders('anthropic', apiKey),
@@ -184,7 +300,7 @@ async function anthropicChat({ baseUrl, apiKey, model, messages }) {
  *           maxTokens?: number }} options
  * @returns {Promise<object>} a reply extractReply() understands
  */
-async function chat({ credential, model, messages, maxTokens }) {
+async function chat({ credential, model, messages, maxTokens, onDelta }) {
   if (!credential || !credential.apiKey) {
     throw Object.assign(new Error('That provider has no API key saved. Add one in settings.'), {
       code: 'NO_KEY',
@@ -197,10 +313,17 @@ async function chat({ credential, model, messages, maxTokens }) {
   const chosen = model || credential.model;
   if (!chosen) throw new Error('No model is chosen for that provider. Pick one in settings.');
 
+  const streaming = typeof onDelta === 'function';
+  const common = { baseUrl, apiKey: credential.apiKey, model: chosen, messages };
+
   if (credential.style === 'anthropic') {
-    return anthropicChat({ baseUrl, apiKey: credential.apiKey, model: chosen, messages });
+    return streaming
+      ? anthropicChatStream({ ...common, maxTokens, onDelta })
+      : anthropicChat({ ...common });
   }
-  return openAiChat({ baseUrl, apiKey: credential.apiKey, model: chosen, messages, maxTokens });
+  return streaming
+    ? openAiChatStream({ ...common, maxTokens, onDelta })
+    : openAiChat({ ...common, maxTokens });
 }
 
 // ── speech, over the same OpenAI-compatible routes ────────────────────────

@@ -132,10 +132,15 @@ function toChatHistory(messages) {
 }
 
 /**
- * @param {{ modelPath: string, messages: Array<{role: string, content: string}>, maxTokens?: number }} options
+ * @param {{ modelPath: string, messages: Array<{role: string, content: string}>, maxTokens?: number,
+ *           onDelta?: (text: string) => void }} options
+ *   `onDelta` receives the reply as it is generated, a few characters at a
+ *   time. Without it nothing is shown until the model has finished, which on a
+ *   local 7B is several seconds of a blank panel — and the voice cannot start
+ *   either, since it has nothing to say yet.
  * @returns {Promise<{ message: { role: string, content: string } }>} an Ollama-shaped reply
  */
-function chat({ modelPath, messages, maxTokens }) {
+function chat({ modelPath, messages, maxTokens, onDelta }) {
   // One context, one conversation at a time.
   const run = queue.then(async () => {
     const { session } = await load(modelPath);
@@ -157,6 +162,19 @@ function chat({ modelPath, messages, maxTokens }) {
       maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : MAX_REPLY_TOKENS,
       temperature: 0.7,
       topP: 0.9,
+      // A throwing listener must not take the generation down with it — the
+      // reply is still wanted even if whoever asked to watch has gone away.
+      ...(typeof onDelta === 'function'
+        ? {
+            onTextChunk: (chunk) => {
+              try {
+                onDelta(String(chunk || ''));
+              } catch {
+                /* the caller's problem, not this one's */
+              }
+            },
+          }
+        : {}),
     });
 
     scheduleIdleUnload();
