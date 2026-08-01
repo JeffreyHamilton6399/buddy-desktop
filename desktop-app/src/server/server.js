@@ -564,6 +564,18 @@ async function updateSummary(conversation, settings) {
   if (settings.saveHistory) await history.persist(conversation);
 }
 
+/**
+ * Did this fail because the model could not manage a tool call?
+ *
+ * Deliberately narrow. A rate limit, a bad key or a missing model are all real
+ * failures the user needs told about, and retrying those without tools would
+ * only fail again a second time and take twice as long doing it.
+ */
+function isToolFailure(error) {
+  const message = String((error && error.message) || '');
+  return /\b400\b/.test(message) && /function|tool/i.test(message);
+}
+
 function streamableProvider(settings) {
   return settings.chat.provider === 'builtin' || settings.chat.provider === 'cloud';
 }
@@ -1317,9 +1329,35 @@ async function handleChat(req, res) {
   const wantsAction =
     settings.allowSystem &&
     (alwaysOffersActions(settings) || actions.looksLikeRequest(lastSaid && lastSaid.content, permissions));
+  /**
+   * How the model is asked to do things.
+   *
+   * A cloud model gets real tools: the provider checks the arguments against a
+   * schema before they ever arrive, and the request comes back as data rather
+   * than as text that has to be recognised. The marker protocol was written
+   * around a 1B model that could not be trusted with JSON, and its instructions
+   * are long — several hundred tokens of worked examples on every turn — so
+   * where tools work, none of that is sent at all.
+   *
+   * Everything else keeps the markers, and so does a cloud model that ignores
+   * the tools and writes one anyway: the reply is parsed either way.
+   */
+  const useTools = wantsAction && settings.chat.provider === 'cloud';
+  const tools = useTools ? actions.toolsFor(permissions) : null;
+
   const withClock = `${clockLine()}\n\n${basePrompt}`;
   const withMemory = remembered.length ? `${withClock}\n\n${remembered.join('\n\n')}` : withClock;
-  const prompt = wantsAction ? `${withMemory}\n\n${actions.instructionsFor(permissions)}` : withMemory;
+  const prompt =
+    wantsAction && !useTools ? `${withMemory}\n\n${actions.instructionsFor(permissions)}` : withMemory;
+
+  /**
+   * The same conversation, told about markers instead of tools. Only built if
+   * the tool attempt fails — see the fallback in the cloud branch below.
+   */
+  const withMarkerInstructions = () => [
+    { role: 'system', content: `${withMemory}\n\n${actions.instructionsFor(permissions)}` },
+    ...context,
+  ];
   const messages = [{ role: 'system', content: prompt }, ...context];
 
   let completion;
@@ -1431,14 +1469,43 @@ async function handleChat(req, res) {
         needsKey: true,
       });
     }
-    completion = await cloud.chat({
-      credential,
-      model: settings.chat.cloudModel,
-      messages,
-      maxTokens: spoken ? VOICE_REPLY_TOKENS : CLOUD_REPLY_TOKENS,
-      onDelta,
-      signal: abandoned.signal,
-    });
+    const send = (extra) =>
+      cloud.chat({
+        credential,
+        model: settings.chat.cloudModel,
+        maxTokens: spoken ? VOICE_REPLY_TOKENS : CLOUD_REPLY_TOKENS,
+        onDelta,
+        signal: abandoned.signal,
+        ...extra,
+      });
+
+    if (tools && tools.length) {
+      try {
+        completion = await send({ messages, tools });
+      } catch (error) {
+        /**
+         * Some models are worse at tools than at prose, and their providers say
+         * so with a hard failure rather than by answering without one.
+         * Measured on Groq's llama-3.3-70b: "search the web for tide times"
+         * returned `400 Failed to call a function` three times out of three,
+         * and other prompts failed intermittently — so offering tools naively
+         * would break messages that work today.
+         *
+         * So a tool failure is not the end of the request. It falls back to the
+         * marker protocol, which needs the instructions the tools replaced and
+         * is therefore a different prompt. Worst case this costs one wasted
+         * call and lands exactly where it would have without any of this.
+         *
+         * Safe to retry: the provider rejects before a single token is
+         * streamed, so nothing has been shown and no header has been sent.
+         */
+        if (!isToolFailure(error) || abandoned.signal.aborted) throw error;
+        console.warn('[buddy] the model could not use tools; falling back to markers');
+        completion = await send({ messages: withMarkerInstructions(), tools: null });
+      }
+    } else {
+      completion = await send({ messages });
+    }
   } else {
     const zai = await getZai();
     completion = await zai.chat.completions.create({ messages, thinking: { type: 'disabled' } });
@@ -1453,13 +1520,29 @@ async function handleChat(req, res) {
   if (abandoned.signal.aborted) return;
 
   const raw = stripThinking(extractReply(completion));
-  if (!raw) throw new Error('The model returned an empty reply');
+  /**
+   * A model that calls a tool usually says nothing alongside it — the call *is*
+   * the answer to "open the BBC website". So an empty reply is only a fault
+   * when there is no tool call to explain it; otherwise the line below turns
+   * the action into something to show.
+   */
+  if (!raw && !(completion && completion.toolCall)) throw new Error('The model returned an empty reply');
 
-  // Only look for an action when the user has allowed them; otherwise the
-  // syntax is just text, and text is all it stays.
-  const parsed = wantsAction
-    ? actions.extractAction(raw, permissions)
-    : { reply: raw, action: null, refused: null };
+  /**
+   * A tool call, if one came back, and otherwise whatever the text says.
+   *
+   * A model offered tools can still answer in prose and put a marker in it —
+   * some do, having seen the shape in their training — so the text is parsed
+   * either way and the structured call simply takes precedence when present.
+   * Both routes end at the same `validate`, which is the point: how the request
+   * was phrased changes nothing about what is allowed.
+   */
+  let parsed = wantsAction ? actions.extractAction(raw, permissions) : { reply: raw, action: null, refused: null };
+
+  if (wantsAction && completion && completion.toolCall) {
+    const called = actions.actionFromToolCall(completion.toolCall.name, completion.toolCall.arguments, permissions);
+    parsed = { reply: parsed.reply, action: called.action, refused: called.refused };
+  }
 
   // What goes in the history is what was said, not the machinery. A model that
   // writes nothing but the marker — which the small one usually does, having been

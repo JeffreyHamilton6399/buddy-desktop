@@ -163,10 +163,36 @@ async function post(url, { headers, body, signal: caller, timeoutMs = REQUEST_TI
   }
 }
 
+// ── tools ─────────────────────────────────────────────────────────────────
+
+/**
+ * The same tool list in each dialect's shape. Both are JSON Schema underneath;
+ * they disagree only about the wrapper and about what the schema field is
+ * called.
+ */
+const openAiTools = (tools) =>
+  tools.map((tool) => ({
+    type: 'function',
+    function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+  }));
+
+const anthropicTools = (tools) =>
+  tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters }));
+
+/** One normalised call, whichever dialect it arrived in. */
+const asToolCall = (name, args) => (name ? { name, arguments: args } : null);
+
 // ── the OpenAI /chat/completions shape ────────────────────────────────────
 
-async function openAiChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta, signal }) {
+async function openAiChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta, signal, tools }) {
   let text = '';
+  /**
+   * A streamed tool call arrives in pieces like the text does: the name in one
+   * delta, the arguments as JSON split across however many follow. They are
+   * accumulated by index, since a model may open more than one.
+   */
+  const calls = [];
+
   await postSse(`${baseUrl}/chat/completions`, {
     signal,
     headers: keys.authHeaders('openai', apiKey),
@@ -174,6 +200,7 @@ async function openAiChatStream({ baseUrl, apiKey, model, messages, maxTokens, o
       model,
       messages: messages.map((message) => ({ role: message.role, content: openAiContent(message) })),
       stream: true,
+      ...(tools && tools.length ? { tools: openAiTools(tools), tool_choice: 'auto' } : {}),
       ...(Number.isFinite(maxTokens) && maxTokens > 0 ? { max_tokens: maxTokens } : {}),
     },
     onData: (data) => {
@@ -184,18 +211,39 @@ async function openAiChatStream({ baseUrl, apiKey, model, messages, maxTokens, o
         return; // a keep-alive or a comment; nothing to add
       }
       const delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
-      const piece = delta && typeof delta.content === 'string' ? delta.content : '';
+      if (!delta) return;
+
+      for (const part of delta.tool_calls || []) {
+        const at = Number.isFinite(part.index) ? part.index : 0;
+        calls[at] = calls[at] || { name: '', arguments: '' };
+        if (part.function && part.function.name) calls[at].name = part.function.name;
+        if (part.function && part.function.arguments) calls[at].arguments += part.function.arguments;
+      }
+
+      const piece = typeof delta.content === 'string' ? delta.content : '';
       if (!piece) return;
       text += piece;
       onDelta(piece);
     },
   });
-  return { message: { role: 'assistant', content: text.trim() } };
+
+  const first = calls.find((call) => call && call.name);
+  return {
+    message: { role: 'assistant', content: text.trim() },
+    ...(first ? { toolCall: asToolCall(first.name, first.arguments) } : {}),
+  };
 }
 
-async function anthropicChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta, signal }) {
+async function anthropicChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta, signal, tools }) {
   const { system, conversation } = splitAnthropic(messages);
   let text = '';
+  /**
+   * Anthropic streams a tool call as a block that opens with its name and is
+   * then filled by `input_json_delta` fragments — so the name arrives before
+   * the arguments, and the arguments are only valid JSON once the block ends.
+   */
+  let call = null;
+
   await postSse(`${baseUrl}/messages`, {
     signal,
     headers: keys.authHeaders('anthropic', apiKey),
@@ -203,6 +251,7 @@ async function anthropicChatStream({ baseUrl, apiKey, model, messages, maxTokens
       model,
       max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : ANTHROPIC_MAX_TOKENS,
       ...(system ? { system } : {}),
+      ...(tools && tools.length ? { tools: anthropicTools(tools) } : {}),
       messages: conversation,
       stream: true,
     },
@@ -213,25 +262,41 @@ async function anthropicChatStream({ baseUrl, apiKey, model, messages, maxTokens
       } catch {
         return;
       }
-      // Anthropic narrates the whole message structure; only the text deltas
-      // of a content block carry anything to show.
+
+      if (parsed.type === 'content_block_start') {
+        const block = parsed.content_block;
+        if (block && block.type === 'tool_use') call = { name: block.name, arguments: '' };
+        return;
+      }
+      // Anthropic narrates the whole message structure; only the deltas of a
+      // content block carry anything.
       if (parsed.type !== 'content_block_delta') return;
+
+      if (parsed.delta && parsed.delta.type === 'input_json_delta' && call) {
+        call.arguments += parsed.delta.partial_json || '';
+        return;
+      }
       const piece = parsed.delta && typeof parsed.delta.text === 'string' ? parsed.delta.text : '';
       if (!piece) return;
       text += piece;
       onDelta(piece);
     },
   });
-  return { message: { role: 'assistant', content: text.trim() } };
+
+  return {
+    message: { role: 'assistant', content: text.trim() },
+    ...(call && call.name ? { toolCall: asToolCall(call.name, call.arguments || '{}') } : {}),
+  };
 }
 
-async function openAiChat({ baseUrl, apiKey, model, messages, maxTokens, signal }) {
+async function openAiChat({ baseUrl, apiKey, model, messages, maxTokens, signal, tools }) {
   const payload = await post(`${baseUrl}/chat/completions`, {
     signal,
     headers: keys.authHeaders('openai', apiKey),
     body: {
       model,
       messages: messages.map((message) => ({ role: message.role, content: openAiContent(message) })),
+      ...(tools && tools.length ? { tools: openAiTools(tools), tool_choice: 'auto' } : {}),
       ...(Number.isFinite(maxTokens) && maxTokens > 0 ? { max_tokens: maxTokens } : {}),
     },
   });
@@ -241,7 +306,14 @@ async function openAiChat({ baseUrl, apiKey, model, messages, maxTokens, signal 
   // calls this next.
   const choice = payload && payload.choices && payload.choices[0];
   const text = (choice && choice.message && choice.message.content) || '';
-  return { message: { role: 'assistant', content: String(text).trim() } };
+  const called = choice && choice.message && (choice.message.tool_calls || [])[0];
+
+  return {
+    message: { role: 'assistant', content: String(text).trim() },
+    ...(called && called.function
+      ? { toolCall: asToolCall(called.function.name, called.function.arguments) }
+      : {}),
+  };
 }
 
 // ── Anthropic's /messages shape ───────────────────────────────────────────
@@ -271,7 +343,7 @@ function splitAnthropic(messages) {
   return { system, conversation };
 }
 
-async function anthropicChat({ baseUrl, apiKey, model, messages, signal }) {
+async function anthropicChat({ baseUrl, apiKey, model, messages, signal, tools }) {
   const { system, conversation: turns } = splitAnthropic(messages);
 
   const payload = await post(`${baseUrl}/messages`, {
@@ -281,6 +353,7 @@ async function anthropicChat({ baseUrl, apiKey, model, messages, signal }) {
       model,
       max_tokens: ANTHROPIC_MAX_TOKENS,
       ...(system ? { system } : {}),
+      ...(tools && tools.length ? { tools: anthropicTools(tools) } : {}),
       messages: turns,
     },
   });
@@ -291,14 +364,17 @@ async function anthropicChat({ baseUrl, apiKey, model, messages, signal }) {
     throw new Error('Claude declined to answer that one.');
   }
 
-  const text = Array.isArray(payload && payload.content)
-    ? payload.content
-        .filter((block) => block && block.type === 'text')
-        .map((block) => block.text)
-        .join('')
-    : '';
+  const blocks = Array.isArray(payload && payload.content) ? payload.content : [];
+  const text = blocks
+    .filter((block) => block && block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+  const used = blocks.find((block) => block && block.type === 'tool_use');
 
-  return { message: { role: 'assistant', content: text.trim() } };
+  return {
+    message: { role: 'assistant', content: text.trim() },
+    ...(used ? { toolCall: asToolCall(used.name, used.input || {}) } : {}),
+  };
 }
 
 /**
@@ -310,7 +386,7 @@ async function anthropicChat({ baseUrl, apiKey, model, messages, signal }) {
  *           maxTokens?: number }} options
  * @returns {Promise<object>} a reply extractReply() understands
  */
-async function chat({ credential, model, messages, maxTokens, onDelta, signal }) {
+async function chat({ credential, model, messages, maxTokens, onDelta, signal, tools }) {
   if (!credential || !credential.apiKey) {
     throw Object.assign(new Error('That provider has no API key saved. Add one in settings.'), {
       code: 'NO_KEY',
@@ -324,7 +400,7 @@ async function chat({ credential, model, messages, maxTokens, onDelta, signal })
   if (!chosen) throw new Error('No model is chosen for that provider. Pick one in settings.');
 
   const streaming = typeof onDelta === 'function';
-  const common = { baseUrl, apiKey: credential.apiKey, model: chosen, messages, signal };
+  const common = { baseUrl, apiKey: credential.apiKey, model: chosen, messages, signal, tools };
 
   if (credential.style === 'anthropic') {
     return streaming

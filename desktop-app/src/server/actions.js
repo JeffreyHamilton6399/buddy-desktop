@@ -178,6 +178,151 @@ const ACTIONS = {
 
 const ACTION_NAMES = Object.keys(ACTIONS);
 
+// ── the same actions, described for a model that can call functions ────────
+
+/**
+ * The marker protocol exists because the default brain is small. Llama 3.2 1B
+ * cannot be relied on to emit valid JSON on cue, so it is asked for
+ * `[[open_url: …]]`, which it manages — and the whole of ACTION_INSTRUCTIONS is
+ * spent teaching it that shape.
+ *
+ * A cloud model does not need teaching. It has been trained to call functions,
+ * the provider validates the arguments against a schema before they arrive, and
+ * the reply comes back as structured data rather than as text that has to be
+ * recognised. So where that is available it is used, and the marker protocol
+ * stays for everything else.
+ *
+ * What does *not* change is the checking. A tool call is turned into exactly
+ * the argument the marker would have produced and put through the same
+ * `validate`, because that function is the security boundary and it should not
+ * matter which way a request arrived at it.
+ */
+const TOOL_SCHEMAS = {
+  open_url: {
+    description: 'Open a web page in the user\'s default browser.',
+    properties: { url: { type: 'string', description: 'Full address, including https://' } },
+    required: ['url'],
+    toArgument: (args) => args.url,
+  },
+  search_web: {
+    description: 'Search the web and show the user the results.',
+    properties: { query: { type: 'string', description: 'What to search for' } },
+    required: ['query'],
+    toArgument: (args) => args.query,
+  },
+  open_folder: {
+    description: "Open one of the assistant's own folders in the file manager.",
+    properties: { folder: { type: 'string', enum: ['models', 'chats', 'config'] } },
+    required: ['folder'],
+    toArgument: (args) => args.folder,
+  },
+  read_file: {
+    description: 'Read a text file and get its contents back. Use this before answering questions about a file.',
+    properties: { path: { type: 'string', description: 'File name, or full path' } },
+    required: ['path'],
+    toArgument: (args) => args.path,
+  },
+  list_folder: {
+    description: 'List what is in a folder. Use "." for the folder shared with you.',
+    properties: { path: { type: 'string', description: 'Folder name or path; "." for the shared folder' } },
+    required: ['path'],
+    toArgument: (args) => args.path,
+  },
+  write_file: {
+    description: 'Write a text file, replacing it entirely. The previous version is kept as a .bak file.',
+    properties: {
+      path: { type: 'string', description: 'File name to write' },
+      content: { type: 'string', description: 'The complete new contents' },
+    },
+    required: ['path', 'content'],
+    toArgument: (args) => ({ path: args.path, content: args.content }),
+  },
+  append_file: {
+    description: 'Add text to the end of a file.',
+    properties: {
+      path: { type: 'string', description: 'File name to add to' },
+      content: { type: 'string', description: 'The text to append' },
+    },
+    required: ['path', 'content'],
+    toArgument: (args) => ({ path: args.path, content: args.content }),
+  },
+  delete_file: {
+    description: 'Delete one file. It goes to the recycle bin and can be recovered.',
+    properties: { path: { type: 'string', description: 'File name to delete' } },
+    required: ['path'],
+    toArgument: (args) => args.path,
+  },
+};
+
+/**
+ * The tools on offer for a given set of permissions, in the JSON Schema shape
+ * both API dialects build on. File tools are withheld when files are off, for
+ * the same reason the instructions withhold them: describing an ability the
+ * model does not have gets you a confident claim to have used it.
+ */
+function toolsFor({ allowSystem = false } = {}) {
+  return ACTION_NAMES.filter((name) => TOOL_SCHEMAS[name])
+    .filter((name) => !ACTIONS[name].needsFiles || allowSystem)
+    .map((name) => ({
+      name,
+      description: TOOL_SCHEMAS[name].description,
+      parameters: {
+        type: 'object',
+        properties: TOOL_SCHEMAS[name].properties,
+        required: TOOL_SCHEMAS[name].required,
+      },
+    }));
+}
+
+/**
+ * Turn a tool call into the same validated action a marker would have made.
+ *
+ * @returns {{ action: object|null, refused: string|null }}
+ */
+function actionFromToolCall(name, args, context = {}) {
+  const settings = { fileRoots: [], allowSystem: false, ...context };
+  const definition = ACTIONS[name];
+  const schema = TOOL_SCHEMAS[name];
+
+  if (!definition || !schema) {
+    return { action: null, refused: `Buddy tried to run "${name}", which is not something it can do.` };
+  }
+  if (definition.needsFiles && !settings.allowSystem) {
+    return { action: null, refused: `Buddy tried to ${definition.summary}, but it is not allowed to touch files.` };
+  }
+
+  // Providers send arguments as a JSON string; a malformed one is the model's
+  // mistake and is refused rather than guessed at.
+  let parsed = args;
+  if (typeof args === 'string') {
+    try {
+      parsed = JSON.parse(args || '{}');
+    } catch {
+      return { action: null, refused: `Buddy tried to ${definition.summary}, but its request was malformed.` };
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return { action: null, refused: `Buddy tried to ${definition.summary}, but sent no arguments.` };
+  }
+
+  const checked = definition.validate(schema.toArgument(parsed), settings);
+  if (!checked.ok) {
+    return { action: null, refused: `Buddy tried to ${definition.summary}, but ${checked.error}.` };
+  }
+
+  return {
+    action: {
+      name,
+      value: checked.value,
+      ...(checked.content !== undefined ? { content: checked.content } : {}),
+      ...(checked.append ? { append: true } : {}),
+      description: definition.describe(checked.value),
+      done: definition.describeDone(checked.value),
+    },
+    refused: null,
+  };
+}
+
 /**
  * Bolted onto the system prompt when the setting is on.
  *
@@ -461,6 +606,8 @@ function extractAction(reply, context = {}) {
 module.exports = {
   ACTIONS,
   ACTION_NAMES,
+  toolsFor,
+  actionFromToolCall,
   ACTION_INSTRUCTIONS,
   instructionsFor,
   extractAction,
