@@ -10,7 +10,17 @@
  */
 'use strict';
 
-import { $, api, boot, runtime, buddyName, wakePhrase, refreshRuntime, voiceInputAvailable } from './core.js';
+import {
+  $,
+  api,
+  boot,
+  runtime,
+  buddyName,
+  wakePhrase,
+  refreshRuntime,
+  streamChat,
+  voiceInputAvailable,
+} from './core.js';
 import { openMicrophone, createVoiceDetector, samplesToBase64 } from './capture.js';
 import { createSpeaker } from './speech.js';
 import { applyLookFromRuntime } from './theme.js';
@@ -647,12 +657,33 @@ export function initOrb() {
     // there to read if the orb is clicked afterwards.
     showToast('Thinking…', false, 0);
 
+    /**
+     * The voice is started before the request, and fed as the reply arrives.
+     *
+     * This is the path the wake word exists for, and it was the slowest one in
+     * the app: the orb asked for the whole answer, waited, and only then began
+     * turning it into sound — so the silence after "Hey Buddy" was the entire
+     * generation followed by the first chunk of synthesis. Overlapped, Buddy
+     * starts answering while it is still deciding how the sentence ends.
+     */
+    const voice = speaker.speakStream();
+    /** The reply as it arrives, which is what the voice is fed. */
+    let spoken = '';
+
     try {
       inFlight = new AbortController();
-      const payload = await api(
-        '/chat',
+      const payload = await streamChat(
         { messages: [{ role: 'user', content: question }], sessionId: activeChatId, voice: true },
-        { signal: inFlight.signal }
+        {
+          signal: inFlight.signal,
+          onDelta: (piece) => {
+            if (!piece) return;
+            spoken += piece;
+            // The toast says "Thinking…" until there is something to say; the
+            // first sound is what replaces it, below.
+            voice.push(spoken);
+          },
+        }
       );
       inFlight = null;
 
@@ -664,7 +695,10 @@ export function initOrb() {
       window.buddy.notifyChatUpdated(activeChatId);
 
       const reply = String(payload.reply || '').trim();
-      if (!reply) return backToWaiting();
+      if (!reply) {
+        await voice.end('');
+        return backToWaiting();
+      }
 
       hideToast();
       /**
@@ -682,7 +716,7 @@ export function initOrb() {
       // Started, not awaited: the page should already be opening while Buddy is
       // still saying it is opening it.
       const acting = performAction(payload);
-      await speaker.speak(reply);
+      await voice.end(reply);
 
       /**
        * Then say what came of it. "What files do I have?" is answered by the
@@ -694,6 +728,9 @@ export function initOrb() {
       if (followUp && !interrupted) await speaker.speak(followUp);
     } catch (error) {
       inFlight = null;
+      // Close the voice off whatever went wrong, or the queue is left open and
+      // the speaking state never clears.
+      voice.end('').catch(() => {});
       // Being talked over calls the request off deliberately; that is not a
       // fault and must not flash an error where the user is already speaking.
       if (error.name === 'AbortError') return;

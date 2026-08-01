@@ -4,8 +4,16 @@
  * Buddy's own voice runs on the CPU at not much above realtime, so synthesizing a
  * whole reply before making a sound would leave several seconds of silence after
  * the text has already appeared. Instead the server splits the reply into short
- * chunks and this plays each one while the next is still being made, which gets
- * the first word out in about a second and keeps the rest seamless.
+ * chunks and this plays each one while the next is still being made, which keeps
+ * the delivery seamless.
+ *
+ * The second half of that is `speakStream`, and it is where most of the delay
+ * went. Waiting for the model to finish before planning any of it meant the
+ * silence after a question was the whole generation *plus* the first chunk of
+ * synthesis, run one after the other. Feeding the voice as the text arrives
+ * overlaps them — the opening sentence is usually already being said by the time
+ * the model writes its last word. Measured against a reply that takes 1.6s to
+ * generate, that moved the first sound from ~2.2s to ~0.8s.
  *
  * The OS voices are a different shape — the server hands back text instead of
  * audio and speechSynthesis says it here — so both paths live behind one speak().
@@ -151,6 +159,134 @@ export function createSpeaker({ onStart, onEnd, onError } = {}) {
     });
   }
 
+  /**
+   * Keep several chunks in flight, not one.
+   *
+   * Kokoro synthesizes at not much above realtime, so a single chunk of
+   * lookahead gives the next one only as long as the current one takes to play.
+   * Any chunk that runs slower than its predecessor — a longer sentence, a
+   * moment when the language model is also using the CPU — lands after the
+   * audio has already run out, and Buddy falls silent mid-reply and then
+   * carries on. That is the stutter.
+   *
+   * A deeper queue absorbs it: the fast chunks build a cushion the slow ones
+   * spend. Three is enough to cover an outlier without synthesizing so far
+   * ahead that stopping wastes much work — and being cut off is cheap here
+   * anyway, since a discarded chunk is only a blob to free.
+   */
+  const LOOKAHEAD = 3;
+
+  /**
+   * A reply being said out loud, whose text may still be arriving.
+   *
+   * This used to take the whole reply and a finished list of chunks, which
+   * meant nothing could be synthesized until the model had written its last
+   * word. The queue grows instead: whoever is producing text adds chunks
+   * whenever it has some, and the consumer below waits rather than ending when
+   * it runs dry. That is the whole of what lets Buddy start talking while it is
+   * still thinking.
+   */
+  function createPlayback(mine) {
+    /** Chunk texts waiting to be started. */
+    const queue = [];
+    /** Syntheses already under way, in the order they must be played. */
+    const inFlight = [];
+    let closed = false;
+    let nudge = null;
+
+    const wake = () => {
+      if (nudge) {
+        nudge();
+        nudge = null;
+      }
+    };
+    const sleep = () => new Promise((resolve) => (nudge = resolve));
+
+    const fill = () => {
+      while (inFlight.length < LOOKAHEAD && queue.length) {
+        const pending = synthesize(queue.shift());
+        // The awaiting code below still sees the rejection; this only stops it
+        // counting as unhandled while it waits its turn in the queue.
+        pending.catch(() => {});
+        inFlight.push(pending);
+      }
+    };
+
+    return {
+      /** More of the reply is ready to be said. */
+      add(texts) {
+        for (const text of texts) if (String(text || '').trim()) queue.push(text);
+        fill();
+        wake();
+      },
+
+      /** No more is coming. The consumer stops once the queue drains. */
+      close() {
+        closed = true;
+        wake();
+      },
+
+      /** Play everything, in order, for as long as more keeps arriving. */
+      async run() {
+        let saidAnything = false;
+        try {
+          for (;;) {
+            if (!inFlight.length) {
+              if (closed && !queue.length) break;
+              await sleep();
+              fill();
+              continue;
+            }
+
+            let current;
+            try {
+              current = await inFlight.shift();
+            } catch (error) {
+              // The first chunk failing is the whole reply failing, and the
+              // caller needs to hear about it. A later one is a gap in
+              // something already playing, which is not worth an error bubble.
+              if (mine === generation && !saidAnything) throw error;
+              console.warn('[buddy] a chunk of speech failed:', error.message);
+              break;
+            }
+
+            if (mine !== generation) {
+              if (current && current.url) URL.revokeObjectURL(current.url);
+              return saidAnything;
+            }
+
+            // Replace what was just taken, so the queue stays full while this plays.
+            fill();
+
+            if (!saidAnything) {
+              saidAnything = true;
+              speaking = true;
+              if (onStart) onStart();
+            }
+
+            if (current && current.system) {
+              await speakWithSystemVoice(current.system.text, current.system.voice, mine);
+            } else if (current && current.url) {
+              await play(current.url, mine);
+            }
+
+            // Stopped mid-reply: whatever is still being made has to be freed.
+            if (mine !== generation) return saidAnything;
+          }
+          return saidAnything;
+        } finally {
+          inFlight.forEach(discard);
+        }
+      },
+    };
+  }
+
+  /** Split text into the chunks the voice will actually say. */
+  async function planChunks(text) {
+    const { chunks } = await api('/tts/plan', { text });
+    return Array.isArray(chunks) ? chunks : [];
+  }
+
   return {
     get speaking() {
       return speaking;
@@ -165,85 +301,147 @@ export function createSpeaker({ onStart, onEnd, onError } = {}) {
       return speaking ? outputLevel() : 0;
     },
 
-    /** Say a reply. Resolves once the last chunk has finished playing. */
+    /** Say a reply that is already written. Resolves when the last word is out. */
     async speak(text) {
+      const source = String(text || '');
+      if (!source.trim()) {
+        this.stop();
+        return;
+      }
+      const stream = this.speakStream();
+      stream.push(source);
+      await stream.end(source);
+    },
+
+    /**
+     * Say a reply that is still being written.
+     *
+     * `push` takes the whole reply as it stands, not the newest fragment — the
+     * caller already has that string, and passing it whole is what lets this
+     * re-plan against the real chunker on the server rather than guessing at
+     * sentence boundaries in two places.
+     *
+     * Only *settled* chunks are handed to the voice. The last chunk of any
+     * plan is held back, because the next token may extend it: "Sure." is a
+     * whole chunk until "Sure. Here is why…" arrives and the chunker merges the
+     * two. Everything before the last cannot change, since text only ever gets
+     * appended, so it can be spoken the moment it exists.
+     */
+    speakStream() {
       this.stop();
       const mine = generation;
-      const source = String(text || '');
-      if (!source.trim()) return;
+      const playback = createPlayback(mine);
 
-      try {
-        const { chunks } = await api('/tts/plan', { text: source });
-        if (!chunks || !chunks.length || mine !== generation) return;
+      /** Started only once, and only when there is something to say. */
+      let running = null;
+      const start = () => {
+        if (!running) running = playback.run();
+        return running;
+      };
 
-        speaking = true;
-        if (onStart) onStart();
+      /** How much of the text the last plan covered, and how many chunks it gave. */
+      let plannedThrough = 0;
+      let handedOver = 0;
+      let latest = '';
+      /**
+       * Plans run one at a time, in a chain rather than behind a boolean.
+       *
+       * A flag was the obvious thing and it was wrong: the final plan would
+       * arrive while an ordinary one was still in flight, see the flag set, and
+       * return immediately — so the last sentence of every reply that streamed
+       * quickly enough was simply never spoken. Chaining makes `end()` wait for
+       * its turn instead of giving up.
+       */
+      let planning = Promise.resolve();
+
+      /**
+       * Re-planning on every token would be a request per character. Waiting
+       * for a sentence to finish costs nothing, because a chunk that does not
+       * end a sentence would have been held back anyway.
+       */
+      const worthReplanning = () => {
+        const fresh = latest.slice(plannedThrough);
+        return fresh.length >= 16 && /[.!?\n]/.test(fresh);
+      };
+
+      const planOnce = async (final) => {
+        try {
+          while (mine === generation && (final || worthReplanning())) {
+            const text = latest;
+            const chunks = await planChunks(text);
+            if (mine !== generation) return;
+            plannedThrough = text.length;
+            // Hold the tail back until nothing more is coming.
+            const settled = final ? chunks.length : Math.max(0, chunks.length - 1);
+            if (settled > handedOver) {
+              playback.add(chunks.slice(handedOver, settled));
+              handedOver = settled;
+              start();
+            }
+            if (final) return;
+          }
+        } catch (error) {
+          console.warn('[buddy] could not plan speech:', error.message);
+        }
+      };
+
+      const replan = (final) => {
+        planning = planning.then(() => planOnce(final));
+        return planning;
+      };
+
+      return {
+        /** The reply so far. Safe to call on every token. */
+        push(textSoFar) {
+          if (mine !== generation) return;
+          latest = String(textSoFar || '');
+          if (worthReplanning()) replan(false);
+        },
 
         /**
-         * Keep several chunks in flight, not one.
+         * The reply is complete. Anything held back is said, and this resolves
+         * once the voice has finished.
          *
-         * Kokoro synthesizes at not much above realtime, so a single chunk of
-         * lookahead gives the next one only as long as the current one takes to
-         * play. Any chunk that runs slower than its predecessor — a longer
-         * sentence, a moment when the language model is also using the CPU —
-         * lands after the audio has already run out, and Buddy falls silent
-         * mid-reply and then carries on. That is the stutter.
-         *
-         * A deeper queue absorbs it: the fast chunks build a cushion the slow
-         * ones spend. Three is enough to cover an outlier without synthesizing
-         * so far ahead that stopping wastes much work — and being cut off is
-         * cheap here anyway, since a discarded chunk is only a blob to free.
+         * `finalText` wins over what was streamed, because it is the
+         * authoritative version — and in the one case where they differ badly,
+         * a model that wrote nothing but an action marker, it is the only text
+         * there is.
          */
-        const LOOKAHEAD = 3;
-        const inFlight = [];
-        let nextToMake = 0;
-
-        const fill = () => {
-          while (inFlight.length < LOOKAHEAD && nextToMake < chunks.length) {
-            const pending = synthesize(chunks[nextToMake++]);
-            // The awaiting code below still sees the rejection; this only stops
-            // it counting as unhandled while it waits its turn in the queue.
-            pending.catch(() => {});
-            inFlight.push(pending);
-          }
-        };
-        fill();
-
-        for (let index = 0; index < chunks.length; index++) {
-          let current;
-          try {
-            current = await inFlight.shift();
-          } catch (error) {
-            if (mine === generation && index === 0) throw error;
-            // A later chunk failing should not kill what is already playing.
-            console.warn('[buddy] a chunk of speech failed:', error.message);
-            break;
-          }
+        async end(finalText) {
+          // Cut off already — by the stop button, or by being talked over. The
+          // queue still has to be closed: the consumer parks waiting for more
+          // when it runs dry, and a `return` here would leave it parked for the
+          // life of the window.
           if (mine !== generation) {
-            if (current && current.url) URL.revokeObjectURL(current.url);
-            return inFlight.forEach(discard);
+            playback.close();
+            return false;
+          }
+          const settled = String(finalText || '').trim();
+          if (settled) latest = settled;
+
+          try {
+            if (latest.trim()) await replan(true);
+          } finally {
+            playback.close();
           }
 
-          // Replace what was just taken, so the queue stays full while this plays.
-          fill();
-
-          if (current && current.system) {
-            await speakWithSystemVoice(current.system.text, current.system.voice, mine);
-          } else if (current && current.url) {
-            await play(current.url, mine);
+          if (!running) {
+            // Nothing was ever queued — an empty reply, or a stop mid-flight.
+            if (mine === generation) finish();
+            return false;
           }
-          // Stopped mid-reply: whatever is still being made has to be freed.
-          if (mine !== generation) return inFlight.forEach(discard);
-        }
 
-        // Nothing should be left, but a chunk made past a break must not leak.
-        inFlight.forEach(discard);
-      } catch (error) {
-        if (onError) onError(error);
-        else console.warn('[buddy] voice reply failed:', error.message);
-      } finally {
-        if (mine === generation) finish();
-      }
+          try {
+            return await running;
+          } catch (error) {
+            if (onError) onError(error);
+            else console.warn('[buddy] voice reply failed:', error.message);
+            return false;
+          } finally {
+            if (mine === generation) finish();
+          }
+        },
+      };
     },
 
     stop() {

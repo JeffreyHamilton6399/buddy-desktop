@@ -144,6 +144,22 @@ export function initPanel() {
     speaker.speak(text);
   }
 
+  /**
+   * Start saying a reply that has not been written yet.
+   *
+   * Speaking used to wait for the last token, so the delay before Buddy made a
+   * sound was the whole generation *plus* the first chunk of synthesis, one
+   * after the other. Feeding the voice as the text arrives overlaps them: by
+   * the time the model has finished, the opening sentence has usually already
+   * been said.
+   *
+   * Returns null when replies are muted, so callers can skip the bookkeeping.
+   */
+  function startSpeaking() {
+    if (runtime.speakReplies === false) return null;
+    return speaker.speakStream();
+  }
+
   // ── pictures ────────────────────────────────────────────────────────────
 
   /**
@@ -366,9 +382,14 @@ export function initPanel() {
       scrollToEnd();
     };
 
+    // Begun before the request, so the first settled sentence can be sent to the
+    // voice the moment it exists rather than after the last token.
+    const voice = startSpeaking();
+
     const onDelta = (piece) => {
       if (!piece) return;
       live += piece;
+      if (voice) voice.push(live);
       if (painting) return;
       painting = true;
       requestAnimationFrame(paint);
@@ -386,10 +407,12 @@ export function initPanel() {
       addMessage('buddy', payload.reply, { markdown: true });
       setBusy(false);
       setStatus('online');
-      speak(payload.reply);
+      if (voice) voice.end(payload.reply);
+      else speak(payload.reply);
       await performAction(payload);
     } catch (error) {
       inFlight = null;
+      if (voice) voice.end('');
       typingRow.remove();
       // Being called off is not a failure worth an error bubble — the user did
       // it on purpose, and whatever had arrived is left where it was.
@@ -495,6 +518,7 @@ export function initPanel() {
         scrollToEnd();
       };
 
+      const voice = startSpeaking();
       try {
         current = await streamChat(
           { messages: [], sessionId, actionResult: result },
@@ -502,6 +526,7 @@ export function initPanel() {
             onDelta: (piece) => {
               if (!piece) return;
               live += piece;
+              if (voice) voice.push(live);
               if (painting) return;
               painting = true;
               requestAnimationFrame(paint);
@@ -512,8 +537,10 @@ export function initPanel() {
         setSession(current.sessionId || sessionId);
         if (current.reply) addMessage('buddy', current.reply, { markdown: true });
         if (current.actionRefused) addMessage('note', current.actionRefused);
-        speak(current.reply);
+        if (voice) voice.end(current.reply);
+        else speak(current.reply);
       } catch (error) {
+        if (voice) voice.end('');
         typingRow.remove();
         addMessage('error', error.message);
         return;
