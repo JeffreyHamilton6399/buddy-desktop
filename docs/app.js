@@ -18,6 +18,9 @@ const API_LATEST = `https://api.github.com/repos/${OWNER}/${REPO}/releases/lates
     'hero-download': '#download',
     'footer-repo': REPO_URL,
     'footer-issues': `${REPO_URL}/issues`,
+    'source-repo': REPO_URL,
+    'source-license': `${REPO_URL}/blob/main/LICENSE`,
+    'source-issues': `${REPO_URL}/issues`,
     'all-releases': RELEASES_LATEST,
   };
 
