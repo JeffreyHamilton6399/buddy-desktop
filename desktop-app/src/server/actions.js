@@ -32,6 +32,50 @@ const files = require('./files.js');
  */
 const BIN = process.platform === 'win32' ? 'Recycle Bin' : 'Trash';
 
+// ── reading whatever the model wrote as an address ────────────────────────
+
+const SEARCH_PREFIX = 'https://duckduckgo.com/?q=';
+
+const searchUrl = (terms) => `${SEARCH_PREFIX}${encodeURIComponent(String(terms).trim())}`;
+const isSearch = (value) => String(value || '').startsWith(SEARCH_PREFIX);
+
+function searchTerms(value) {
+  try {
+    return decodeURIComponent(String(value).slice(SEARCH_PREFIX.length));
+  } catch {
+    return String(value).slice(SEARCH_PREFIX.length);
+  }
+}
+
+/** The address, if it is one Buddy will hand to a browser. Otherwise null. */
+function asWebUrl(candidate) {
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A host with an optional port and path — `bbc.co.uk`, `example.com:8080`,
+ * `localhost:3000`. The port is the part that matters: without it here, a
+ * `host:port` gets read as a scheme by the URL parser and refused.
+ */
+const HOSTISH = /^(?:[a-z0-9][a-z0-9.-]*\.[a-z]{2,}|localhost|127\.0\.0\.1)(?::\d{1,5})?(?:[/?#].*)?$/i;
+
+/** This machine, where a bare port means a dev server rather than a website. */
+const LOOPBACK = /^(?:localhost|127\.0\.0\.1)(?::|\/|$)/i;
+
+/** The scheme of something that parsed as a URL, for saying why it was refused. */
+function schemeOf(candidate) {
+  try {
+    return new URL(candidate).protocol.replace(/:$/, '');
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Everything Buddy is allowed to do, and how to check the argument.
  *
@@ -42,35 +86,62 @@ const BIN = process.platform === 'win32' ? 'Recycle Bin' : 'Trash';
 const ACTIONS = {
   open_url: {
     summary: 'open a web page',
+    /**
+     * What the model writes here is rarely a tidy address.
+     *
+     * Three shapes have to be told apart, and the old version got the middle
+     * one wrong. A full address is easy. A bare host is easy. But `bbc.co.uk:80`
+     * parses as a URL whose *scheme* is `bbc.co.uk` — schemes are allowed to
+     * contain dots — so a perfectly ordinary address with a port on it was
+     * being refused as "only http and https addresses can be opened", which is
+     * both wrong and impossible to act on.
+     *
+     * And a name that is not an address at all — "youtube", "the BBC website" —
+     * used to be a dead end. Searching for it is what a person would do, and
+     * Buddy can already search safely, so that is what happens now. It is
+     * described as a search, not as opening something, because the user should
+     * never be told one thing happened while another did.
+     */
     validate(argument) {
-      const raw = String(argument || '').trim();
-      let url;
-      try {
-        url = new URL(raw);
-      } catch {
-        // Models write "youtube.com", or just "youtube", far more often than a
-        // full address. Anything that looks like a hostname gets https:// put on
-        // the front; anything that does not is still refused, so this widens what
-        // is understood without widening what is allowed.
-        const host = raw.replace(/^\/+/, '');
-        if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(\/.*)?$/i.test(host)) {
-          return { ok: false, error: 'that is not a web address' };
-        }
-        try {
-          url = new URL(`https://${host}`);
-        } catch {
-          return { ok: false, error: 'that is not a web address' };
-        }
+      // Models like to wrap addresses in quotes or angle brackets.
+      const raw = String(argument || '')
+        .trim()
+        .replace(/^["'<(]+|["'>)]+$/g, '')
+        .trim();
+      if (!raw) return { ok: false, error: 'no address was given' };
+
+      // 1. Already a web address.
+      const direct = asWebUrl(raw);
+      if (direct) return { ok: true, value: direct };
+
+      // 2. A host, possibly with a port or a path, possibly protocol-relative.
+      //    https everywhere except this machine, where a thing on a port is
+      //    almost always somebody's dev server and almost never has a
+      //    certificate — sending those to https just fails to connect.
+      const host = raw.replace(/^\/+/, '');
+      if (HOSTISH.test(host)) {
+        const scheme = LOOPBACK.test(host) ? 'http' : 'https';
+        const built = asWebUrl(`${scheme}://${host}`);
+        if (built) return { ok: true, value: built };
       }
-      // Only the two schemes a browser should be handed. Anything else — file,
-      // javascript, data — is a way of reaching something that is not a web page.
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-        return { ok: false, error: 'only http and https addresses can be opened' };
+
+      // 3. Something that parses but is not the web. This is the boundary the
+      //    whole action exists to hold, so it is refused by name rather than
+      //    quietly turned into something else.
+      const scheme = schemeOf(raw);
+      if (scheme) {
+        if (/^[a-z]$/i.test(scheme)) {
+          return { ok: false, error: 'that is a file on this computer, not a web page' };
+        }
+        return { ok: false, error: `${scheme}: addresses cannot be opened — only web pages` };
       }
-      return { ok: true, value: url.toString() };
+
+      // 4. Not an address at all. Take it as something to look up.
+      if (raw.length > 300) return { ok: false, error: 'that is too long to be an address or a search' };
+      return { ok: true, value: searchUrl(raw) };
     },
-    describe: (value) => `open ${value}`,
-    describeDone: (value) => `Opened ${value}`,
+    describe: (value) => (isSearch(value) ? `search for “${searchTerms(value)}”` : `open ${value}`),
+    describeDone: (value) => (isSearch(value) ? `Searched for “${searchTerms(value)}”` : `Opened ${value}`),
   },
 
   search_web: {
