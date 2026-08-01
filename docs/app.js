@@ -17,6 +17,7 @@ const API_LATEST = `https://api.github.com/repos/${OWNER}/${REPO}/releases/lates
   const links = {
     'hero-download': '#download',
     'footer-repo': REPO_URL,
+    'footer-issues': `${REPO_URL}/issues`,
     'all-releases': RELEASES_LATEST,
   };
 

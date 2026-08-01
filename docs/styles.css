@@ -454,6 +454,87 @@ tbody tr:last-child td {
   letter-spacing: 0.03em;
 }
 
+/* ── requirements: a qualifier beside a model's name ─────────────────────── */
+
+.note-tag {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+/* ── questions ───────────────────────────────────────────────────────────── */
+
+/* Capped rather than full width: the +/− marker sits at the right edge, and
+   across the whole of a wide page it ends up stranded a foot away from the
+   question it belongs to. */
+.faq {
+  max-width: 880px;
+  border-top: 1px solid var(--line);
+}
+
+.faq details {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.faq summary {
+  padding: 15px 28px 15px 0;
+  position: relative;
+  cursor: pointer;
+  font-size: 15px;
+  /* The default triangle sits too far from the text and cannot be restyled
+     consistently, so it goes and the +/− below takes its place. */
+  list-style: none;
+}
+
+.faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq summary::after {
+  content: "+";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--dim);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.faq details[open] summary::after {
+  content: "−";
+}
+
+.faq summary:hover,
+.faq details[open] summary {
+  color: var(--text);
+}
+
+.faq summary:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.faq p {
+  margin: 0;
+  padding: 0 28px 18px 0;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+
+.faq code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 /* ── footer ──────────────────────────────────────────────────────────────── */
 
 .foot {
@@ -466,6 +547,33 @@ tbody tr:last-child td {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.foot-links {
+  display: flex;
+  gap: 22px;
+}
+
+/* No max-width: the rule above this is the footer's own divider and should run
+   the width of the container rather than stopping wherever the text happens to. */
+.foot-credits {
+  margin: 14px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.foot-credits a {
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.foot-credits a:hover {
+  color: var(--text);
 }
 
 .foot a:hover {

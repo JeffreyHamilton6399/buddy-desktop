@@ -10,6 +10,45 @@
     />
     <meta name="theme-color" content="#0a0a0b" />
     <link rel="icon" href="orb.svg" type="image/svg+xml" />
+    <link rel="canonical" href="https://jeffreyhamilton6399.github.io/buddy-desktop/" />
+
+    <!--
+      What this page looks like when somebody pastes the link somewhere.
+      Without these it arrives as a bare URL with no title, no description and
+      no picture, which is the difference between a link that looks like a
+      product and one that looks like a stray address.
+
+      og:image must be absolute — relative paths are not resolved by the
+      services that read these.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Buddy" />
+    <meta property="og:title" content="Buddy — an AI that lives on your desktop" />
+    <meta
+      property="og:description"
+      content="A small orb that sits above your other windows. Say “Hey Buddy” and it listens straight away. No API key, no account — it brings its own model, voice and ears, and keeps working with the network unplugged."
+    />
+    <meta property="og:url" content="https://jeffreyhamilton6399.github.io/buddy-desktop/" />
+    <meta property="og:image" content="https://jeffreyhamilton6399.github.io/buddy-desktop/buddy-panel.png" />
+    <meta property="og:image:width" content="420" />
+    <meta property="og:image:height" content="620" />
+    <meta
+      property="og:image:alt"
+      content="Buddy's chat panel, answering a question about whether it needs the internet."
+    />
+    <!--
+      "summary" rather than "summary_large_image" on purpose: the screenshot is
+      a tall 420x620 panel, and the large card crops to roughly 2:1, which would
+      show a horizontal band from the middle of it and nothing else.
+    -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Buddy — an AI that lives on your desktop" />
+    <meta
+      name="twitter:description"
+      content="Runs entirely on your computer. No API key, no account, no telemetry. Free and MIT licensed."
+    />
+    <meta name="twitter:image" content="https://jeffreyhamilton6399.github.io/buddy-desktop/buddy-panel.png" />
+
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -150,7 +189,8 @@
             </p>
             <p>
               The exception is the first launch, which downloads the model, the voice and the ears — about
-              three gigabytes in total, once. After that you can unplug the network and Buddy carries on.
+              two and a half gigabytes in total, once. After that you can unplug the network and Buddy
+              carries on.
               Please do check. No telemetry, no account.
             </p>
             <p class="aside">
@@ -159,6 +199,62 @@
               nothing of yours passes through us, because there is no “us” in the path. Your key is stored on
               your machine and sent only to the provider it belongs to. Setting listening to <em>off</em>
               means the microphone is never opened at all.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── what it needs ─────────────────────────────────────────────── -->
+      <section class="band" id="requirements">
+        <div class="wrap split">
+          <div class="split-main">
+            <h2>What it needs</h2>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Brain</th>
+                    <th scope="col">Download</th>
+                    <th scope="col">Memory while answering</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">MiniCPM5 1B <span class="note-tag">smallest</span></th>
+                    <td>0.6 GB</td>
+                    <td>about 1.2 GB</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Qwen 3 4B <span class="note-tag">default</span></th>
+                    <td>2.3 GB</td>
+                    <td>about 3.5 GB</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">GPT-OSS 20B <span class="note-tag">largest</span></th>
+                    <td>10.8 GB</td>
+                    <td>about 14 GB</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="split-side">
+            <p>
+              A 64-bit machine — macOS 11 or later, Windows 10 or later, or a modern Linux. Eight gigabytes
+              of memory is comfortable for the default brain, and the model list inside the app greys out
+              anything your machine cannot hold rather than letting you find out the hard way.
+            </p>
+            <p>
+              A graphics card is used if you have one and is not required. Where one is used the model sits
+              in its memory, so a bigger brain than your card can hold is the one thing worth avoiding —
+              that is the setting that makes everything else on the machine feel slow.
+            </p>
+            <p class="aside">
+              Buddy loads the brain when you actually speak to it and gives the memory back after ten
+              minutes idle, so sitting in your tray costs a few hundred megabytes rather than several
+              gigabytes. The voice adds 156 MB and the ears 39 MB, both one-time and both far smaller than
+              the brain.
             </p>
           </div>
         </div>
@@ -207,12 +303,95 @@
           </p>
         </div>
       </section>
+      <!-- ── questions ─────────────────────────────────────────────────── -->
+      <section class="band" id="questions">
+        <div class="wrap">
+          <h2>Questions</h2>
+          <!--
+            <details> rather than a scripted accordion: it opens without
+            JavaScript, it is keyboard operable for free, and the browser's
+            find-in-page can see inside a closed one.
+          -->
+          <div class="faq">
+            <details>
+              <summary>Does it need the internet?</summary>
+              <p>
+                Only for the first launch, which fetches the model, the voice and the ears — about two and a
+                half gigabytes, once. After that you can unplug the network and everything still works.
+                Buddy reaches out again only if you point one of its three jobs at a cloud provider, or ask
+                it to open or search something.
+              </p>
+            </details>
+            <details>
+              <summary>What does it send about me?</summary>
+              <p>
+                Nothing. There is no telemetry, no account and no analytics, and there is no Buddy server for
+                anything to pass through. Point a job at a cloud provider and those messages go to that
+                provider — your key is stored on your machine and sent only to whoever issued it.
+              </p>
+            </details>
+            <details>
+              <summary>Is it really free?</summary>
+              <p>
+                Yes, and MIT licensed. There is no paid tier and nothing to sign up for. If you choose to use
+                a cloud provider you pay them directly, at their prices, with your own key.
+              </p>
+            </details>
+            <details>
+              <summary>Will it slow my computer down?</summary>
+              <p>
+                Sitting in your tray it holds a few hundred megabytes. The brain is loaded when you speak to
+                it and released after ten minutes of not being used, so the several gigabytes a language
+                model needs are only spent while you are actually getting answers. The first question after
+                a quiet stretch waits a few seconds for that load.
+              </p>
+            </details>
+            <details>
+              <summary>Can it touch my files?</summary>
+              <p>
+                Not until you switch it on. With the system switch on it can open pages, look at your screen
+                and read, write and delete files — and it will still refuse programs, keys and databases,
+                keep a <code>.bak</code> of anything it overwrites, send deletions to the recycle bin, and
+                write every action into the chat as it happens. Naming folders narrows where it may write.
+              </p>
+            </details>
+            <details>
+              <summary>How do I remove it?</summary>
+              <p>
+                Uninstall it the way you would anything else, then delete Buddy's folder to reclaim the
+                models — <code>%APPDATA%\Buddy</code> on Windows,
+                <code>~/Library/Application Support/Buddy</code> on macOS, <code>~/.config/Buddy</code> on
+                Linux. Your chats are plain files in there. Nothing is left anywhere else, because nothing
+                was ever anywhere else.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
     </main>
 
     <footer class="foot">
-      <div class="wrap foot-inner">
-        <span>MIT licensed</span>
-        <a id="footer-repo" href="#">GitHub</a>
+      <div class="wrap">
+        <div class="foot-inner">
+          <span>MIT licensed. Built by Jeff Hamilton.</span>
+          <nav class="foot-links">
+            <a id="footer-repo" href="#">Source</a>
+            <a id="footer-issues" href="#">Report a problem</a>
+            <a href="#download">Download</a>
+          </nav>
+        </div>
+        <!--
+          The parts that do the actual work are other people's. Saying whose is
+          the least a page like this can do, and it also tells a visitor exactly
+          what is running on their machine.
+        -->
+        <p class="foot-credits">
+          Thinking runs on <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a>, speaking on
+          <a href="https://github.com/hexgrad/kokoro">Kokoro</a>, listening on
+          <a href="https://github.com/openai/whisper">Whisper</a> via
+          <a href="https://github.com/huggingface/transformers.js">Transformers.js</a>, all of it inside
+          <a href="https://www.electronjs.org/">Electron</a>.
+        </p>
       </div>
     </footer>
 
