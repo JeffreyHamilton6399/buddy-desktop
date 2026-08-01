@@ -1529,6 +1529,106 @@ body.flat .panel {
   border-top: 1px solid var(--edge);
 }
 
+/* ── the shortcuts, written out ──────────────────────────────────────────── */
+
+.keys {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.key-combo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.key-combo kbd {
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--edge);
+  border-bottom-width: 2px;
+  background: rgba(var(--raise-rgb), 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.key-what {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* ── copy and retry, on hover over an answer ─────────────────────────────── */
+
+/*
+ * `.msg` is a flex row, so these trail the bubble rather than sitting under it,
+ * pinned to its bottom edge. Under it would need a wrapper element around the
+ * bubble, and a whole extra box in every message to hold two icons that are
+ * invisible most of the time is not worth it.
+ */
+.msg-acts {
+  display: flex;
+  align-self: flex-end;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin-bottom: 1px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+/* Kept while a button inside has focus, so this is reachable from the keyboard. */
+.msg:hover .msg-acts,
+.msg-acts:focus-within {
+  opacity: 1;
+}
+
+.msg-act {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: none;
+  background: none;
+  color: var(--dim-2);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.msg-act:hover {
+  background: rgba(var(--raise-rgb), 0.12);
+  color: inherit;
+}
+
+.msg-act.done {
+  color: var(--tone-amber);
+}
+
+.msg-act.failed {
+  color: var(--tone-rose);
+}
+
+.msg-act svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* ── what Buddy remembers ────────────────────────────────────────────────── */
 
 /*

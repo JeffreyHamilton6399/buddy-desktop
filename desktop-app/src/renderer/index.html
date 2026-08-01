@@ -159,7 +159,7 @@
               <div class="panes" id="settings-panes">
                 <!-- ── brain: which model answers ─────────────────── -->
                 <section class="pane is-on" data-pane="brain" role="tabpanel">
-                  <h2>Where Buddy thinks</h2>
+                  <h2 data-name-template="Where {name} thinks">Where Buddy thinks</h2>
                   <!--
                     This pair is the way back as much as the way out. Switching
                     to the cloud used to be a one-way door: the built-in model
@@ -246,7 +246,7 @@
                 <section class="pane" data-pane="speech" role="tabpanel">
                   <h2>Talking and listening</h2>
 
-                  <h3>How Buddy sounds</h3>
+                  <h3 data-name-template="How {name} sounds">How Buddy sounds</h3>
 
                   <!-- Lived in the panel header as an unlabelled speaker icon,
                        which is not where anyone would look for it. -->
@@ -263,7 +263,7 @@
 
                   <div class="asset" id="voice-asset" hidden>
                     <div class="asset-text">
-                      <strong id="voice-asset-title">Buddy's own voice isn't downloaded yet</strong>
+                      <strong id="voice-asset-title" data-name-template="{name}’s own voice isn’t downloaded yet">Buddy’s own voice isn’t downloaded yet</strong>
                       <span id="voice-asset-sub">A one-time 156 MB download. After it, speaking never needs the internet.</span>
                     </div>
                     <div class="bar" aria-hidden="true"><span class="bar-fill" id="voice-bar"></span></div>
@@ -306,7 +306,7 @@
                   <h3 class="section-break">Listening for you</h3>
                   <div class="asset" id="hearing-asset" hidden>
                     <div class="asset-text">
-                      <strong id="hearing-asset-title">Buddy's ears aren't downloaded yet</strong>
+                      <strong id="hearing-asset-title" data-name-template="{name}’s ears aren’t downloaded yet">Buddy’s ears aren’t downloaded yet</strong>
                       <span id="hearing-asset-sub">A one-time 39 MB download. After it, listening never needs the internet.</span>
                     </div>
                     <div class="bar" aria-hidden="true"><span class="bar-fill" id="hearing-bar"></span></div>
@@ -357,10 +357,23 @@
                   </div>
 
                   <!--
+                    Deliberately here rather than under Look, and deliberately
+                    below the wake-word test. This is where somebody is standing
+                    when the wake word has just failed them, and these are the
+                    two ways in that do not depend on a microphone, a room, a
+                    Bluetooth link or a transcriber.
+                  -->
+                  <h3 class="section-break">When speaking to it will not do</h3>
+                  <p class="pane-lede">
+                    These work anywhere, even over a full-screen window, and never depend on being heard.
+                  </p>
+                  <div class="keys" id="shortcut-list"></div>
+
+                  <!--
                     What the orb has actually heard. Without this, a wake word
                     that never fires gives you nothing to go on at all.
                   -->
-                  <h3>What Buddy heard recently</h3>
+                  <h3 id="heard-title" data-name-template="What {name} heard recently">What Buddy heard recently</h3>
                   <div class="heard-list" id="heard-list"></div>
 
                   <div class="probe-list" id="wake-probe" hidden>
@@ -380,7 +393,7 @@
 
                 <!-- ── what Buddy is allowed to do ────────────────── -->
                 <section class="pane" data-pane="doing" role="tabpanel">
-                  <h2>What Buddy may do</h2>
+                  <h2 data-name-template="What {name} may do">What Buddy may do</h2>
                   <p class="pane-lede">
                     Everything here is off until you turn it on, and every action is written into the chat
                     as it happens — nothing is done quietly.
@@ -394,7 +407,7 @@
                   <label class="switch big">
                     <input type="checkbox" id="allow-system" />
                     <span>
-                      <strong>Let Buddy into your system</strong>
+                      <strong id="allow-system-label" data-name-template="Let {name} into your system">Let Buddy into your system</strong>
                       <small>
                         Open web pages and searches, look at your screen, and read, write and delete files.
                         The old version of anything it overwrites is kept alongside it as a .bak file,
@@ -449,14 +462,14 @@
                   you tell it, what it works out for itself.
                 -->
                 <section class="pane" data-pane="memory" role="tabpanel">
-                  <h2>What Buddy keeps</h2>
+                  <h2 data-name-template="What {name} keeps">What Buddy keeps</h2>
 
                   <h3>Your conversations</h3>
                   <label class="switch big">
                     <input type="checkbox" id="save-history" />
                     <span>
                       <strong>Keep chats on this device</strong>
-                      <small>Stored as a plain file in Buddy's own folder. Nothing is uploaded.</small>
+                      <small id="save-history-note">Stored as a plain file in Buddy's own folder. Nothing is uploaded.</small>
                     </span>
                   </label>
                   <p class="pane-lede" id="chat-count"></p>
@@ -577,10 +590,10 @@
 
                 <!-- ── about ──────────────────────────────────────── -->
                 <section class="pane" data-pane="about" role="tabpanel">
-                  <h2>About Buddy</h2>
+                  <h2 data-name-template="About {name}">About Buddy</h2>
                   <p class="pane-lede" id="about-version"></p>
                   <div class="facts" id="about-facts"></div>
-                  <button class="btn" id="open-folder" type="button">Show Buddy's folder</button>
+                  <button class="btn" id="open-folder" type="button" data-name-template="Show {name}’s folder">Show Buddy’s folder</button>
                 </section>
               </div>
             </div>

@@ -24,6 +24,15 @@ contextBridge.exposeInMainWorld('buddy', {
   openExternal: (url) => ipcRenderer.send('buddy:open-external', String(url)),
   openConfigFolder: () => ipcRenderer.send('buddy:open-config-folder'),
 
+  /**
+   * Put text on the clipboard.
+   *
+   * Electron's own clipboard rather than navigator.clipboard, which is refused
+   * in this renderer — the web API wants a permission that a custom protocol
+   * page does not get, so the copy button silently failed every time.
+   */
+  copyText: (text) => ipcRenderer.send('buddy:copy-text', String(text)),
+
   /** Native folder picker, for choosing where Buddy may read and write. */
   pickFolder: () => ipcRenderer.invoke('buddy:pick-folder'),
 
@@ -57,6 +66,9 @@ contextBridge.exposeInMainWorld('buddy', {
   onWakeToggled: (handler) => subscribe('buddy:wake-toggled', handler),
   onPanelVisibility: (handler) => subscribe('buddy:panel-visibility', handler),
   onRuntimeChanged: (handler) => subscribe('buddy:runtime-changed', handler),
+  /** The global shortcuts, arriving from whichever window has focus — or none. */
+  onFocusComposer: (handler) => subscribe('buddy:focus-composer', handler),
+  onSilence: (handler) => subscribe('buddy:silence', handler),
   onActiveChat: (handler) => subscribe('buddy:active-chat', handler),
   onChatUpdated: (handler) => subscribe('buddy:chat-updated', handler),
 });

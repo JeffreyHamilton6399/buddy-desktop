@@ -991,7 +991,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       empty.className = 'pane-lede';
       empty.textContent =
         runtime.providers.asr === 'off'
-          ? 'Listening is off, so Buddy is not hearing anything.'
+          ? `Listening is off, so ${buddyName()} is not hearing anything.`
           : 'Nothing yet. Say something near the microphone and it will appear here.';
       list.appendChild(empty);
       return;
@@ -1348,11 +1348,44 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
    * deliberately not here: renderAsset owns those and repaints them on a poll,
    * so anything written from this side would be wiped within the second.
    */
+  /**
+   * Everything in the panel that says Buddy's name out loud.
+   *
+   * This covered three labels and missed six, which only became obvious once
+   * renaming could be done by voice: an assistant called Jeff was still
+   * offering "Buddy's own ears" and "Off — Buddy cannot hear at all", two
+   * controls away from a header reading Jeff. A rename that leaves the old name
+   * lying around the settings reads as a rename that did not work.
+   */
   function applyNaming() {
     const phrase = wakePhrase();
+    const name = buddyName();
+
     $('wake-toggle-label').textContent = `Answer to “${phrase}”`;
     $('mic-test').textContent = `Test “${phrase}”`;
     $('probe-match-label').textContent = `Matched “${phrase}”`;
+
+    /**
+     * Everything else carries its own wording as a template, so adding a
+     * heading that names Buddy needs no line here — just the attribute. The
+     * markup keeps the default text too, so the file still reads correctly to
+     * anybody looking at it rather than being a page full of placeholders.
+     */
+    for (const element of document.querySelectorAll('[data-name-template]')) {
+      element.textContent = element.dataset.nameTemplate.replace(/\{name\}/g, name);
+    }
+
+    // The provider pickers name Buddy in the options that mean "in this app".
+    const option = (selectId, value) => $(selectId).querySelector(`option[value="${value}"]`);
+    const own = [
+      [option('tts-provider', 'kokoro'), `${name}'s own voice — neural, on this machine`],
+      [option('asr-provider', 'local'), `${name}'s own ears — Whisper, on this machine`],
+      [option('asr-provider', 'off'), `Off — ${name} cannot hear at all`],
+    ];
+    for (const [element, text] of own) if (element) element.textContent = text;
+
+    $('save-history-note').textContent = `Stored as a plain file in ${name}'s own folder. Nothing is uploaded.`;
+    $('memory-add-text').placeholder = `Tell ${name} something to remember…`;
   }
 
   // ── chats ───────────────────────────────────────────────────────────────
@@ -1410,6 +1443,49 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
         : 'Nothing saved yet.';
     } catch {
       $('chat-count').textContent = '';
+    }
+  }
+
+  // ── the keys that always work ───────────────────────────────────────────
+
+  /**
+   * The global shortcuts, written the way this machine writes them.
+   *
+   * Kept in step with SHORTCUTS in main.js by hand. That is a duplication, but
+   * the alternative is shipping the accelerator strings to the renderer and
+   * parsing Electron's format here, which is more machinery than two lines of
+   * text are worth.
+   */
+  function renderShortcuts() {
+    const mac = boot.platform === 'darwin';
+    const mod = mac ? '⌘' : 'Ctrl';
+    const shift = mac ? '⇧' : 'Shift';
+    const rows = [
+      [[mod, shift, 'Space'], `Open ${buddyName()}, ready to type`],
+      [[mod, shift, '.'], 'Stop talking'],
+    ];
+
+    const list = $('shortcut-list');
+    list.replaceChildren();
+    for (const [keys, what] of rows) {
+      const row = document.createElement('div');
+      row.className = 'key-row';
+
+      const combo = document.createElement('span');
+      combo.className = 'key-combo';
+      keys.forEach((key, index) => {
+        if (index) combo.append(document.createTextNode('+'));
+        const kbd = document.createElement('kbd');
+        kbd.textContent = key;
+        combo.append(kbd);
+      });
+
+      const label = document.createElement('span');
+      label.className = 'key-what';
+      label.textContent = what;
+
+      row.append(combo, label);
+      list.append(row);
     }
   }
 
@@ -1802,6 +1878,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     renderLook();
     renderKeys();
     $('whisper-url').value = runtime.asrBaseUrl || '';
+    renderShortcuts();
     await Promise.all([renderModels(), renderAssets(), renderChats(), renderMemory(), renderHeard()]);
     // After the others, not before: the About pane's note about memories going
     // to a cloud brain needs the memory state that renderMemory has just fetched.
