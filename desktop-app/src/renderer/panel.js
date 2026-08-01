@@ -34,6 +34,8 @@ export function initPanel() {
 
   let sessionId = null;
   let busy = false;
+  /** The reply being generated right now, so interrupting can call it off. */
+  let inFlight = null;
 
   /**
    * Put whatever Buddy is currently called into the chrome that names it. The
@@ -372,8 +374,13 @@ export function initPanel() {
       requestAnimationFrame(paint);
     };
 
+    inFlight = new AbortController();
     try {
-      const payload = await streamChat({ messages: [{ role: 'user', content, images }], sessionId }, { onDelta });
+      const payload = await streamChat(
+        { messages: [{ role: 'user', content, images }], sessionId },
+        { onDelta, signal: inFlight.signal }
+      );
+      inFlight = null;
       typingRow.remove();
       setSession(payload.sessionId || sessionId);
       addMessage('buddy', payload.reply, { markdown: true });
@@ -382,7 +389,16 @@ export function initPanel() {
       speak(payload.reply);
       await performAction(payload);
     } catch (error) {
+      inFlight = null;
       typingRow.remove();
+      // Being called off is not a failure worth an error bubble — the user did
+      // it on purpose, and whatever had arrived is left where it was.
+      if (error.name === 'AbortError') {
+        if (live.trim()) addMessage('buddy', live, { markdown: true });
+        setBusy(false);
+        setStatus('online');
+        return;
+      }
       addMessage('error', error.message);
       setBusy(false);
       setStatus('offline', 'bad');
@@ -885,10 +901,24 @@ export function initPanel() {
    * so interrupting here is a deliberate act: press Escape, or click the bars
    * that are bouncing along while Buddy speaks.
    */
+  /**
+   * Stop. Both halves of it.
+   *
+   * Silencing the voice was only ever half an interruption — the model kept
+   * generating to the last token, so the machine stayed busy answering
+   * something the user had already dismissed. Dropping the request is what
+   * actually stops it; see the abort handling in handleChat.
+   */
   function stopSpeaking() {
-    if (!speaker.speaking) return false;
+    const wasSpeaking = speaker.speaking;
+    const wasThinking = Boolean(inFlight);
+
     speaker.stop();
-    return true;
+    if (inFlight) {
+      inFlight.abort();
+      inFlight = null;
+    }
+    return wasSpeaking || wasThinking;
   }
 
   equalizer.addEventListener('click', stopSpeaking);

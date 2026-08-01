@@ -90,6 +90,19 @@ const DEFAULTS = {
    * by Whisper, which not every good name does.
    */
   identity: { name: DEFAULT_NAME, wakeWord: DEFAULT_WAKE_WORD },
+  /**
+   * What Buddy should know about the person it is talking to, carried into
+   * every conversation.
+   *
+   * A chat remembers itself and nothing beyond itself, so Buddy met everybody
+   * as a stranger every time a new one was started — which for something that
+   * lives on your desktop all day is the wrong shape entirely. This is the
+   * cheapest possible fix for that: a few lines the user writes once, added to
+   * the system prompt. Deliberately not learned or inferred, because a note
+   * about yourself that you cannot see and did not write is a worse thing to
+   * have than no note at all.
+   */
+  about: '',
   saveHistory: true,
   /**
    * Whether typed replies are read out loud in the panel. A real setting rather
@@ -282,6 +295,9 @@ function normaliseSettings(raw) {
     },
     saveHistory: input.saveHistory !== false,
     speakReplies: input.speakReplies !== false,
+    // Capped because it rides on every single request: a page of prose here
+    // would cost tokens on every turn of every conversation forever.
+    about: text(input.about, DEFAULTS.about).slice(0, 600),
     // Default to false rather than true: this has to be asked for.
     allowSystem: input.allowSystem === true,
     fileRoots: files.normaliseRoots(input.fileRoots),

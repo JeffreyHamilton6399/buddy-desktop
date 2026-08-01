@@ -1130,9 +1130,17 @@ body.flat .panel {
   font-weight: 400;
 }
 
+/*
+ * Text inputs and textareas were missing from this list, so the name and wake
+ * word fields were drawn as raw browser controls — white boxes with a grey
+ * bevel, in a dark panel. They are the same kind of thing as the selects beside
+ * them and should look it.
+ */
 .pane select,
+.pane input[type="text"],
 .pane input[type="url"],
-.pane input[type="password"] {
+.pane input[type="password"],
+.pane textarea {
   width: 100%;
   height: 34px;
   padding: 0 9px;
@@ -1145,15 +1153,28 @@ body.flat .panel {
   cursor: pointer;
 }
 
+.pane input[type="text"],
 .pane input[type="url"],
-.pane input[type="password"] {
+.pane input[type="password"],
+.pane textarea {
   cursor: text;
   user-select: text;
 }
 
+/* A textarea is the one that is not a single line. */
+.pane textarea {
+  height: auto;
+  padding: 8px 9px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 72px;
+}
+
 .pane select:focus,
+.pane input[type="text"]:focus,
 .pane input[type="url"]:focus,
-.pane input[type="password"]:focus {
+.pane input[type="password"]:focus,
+.pane textarea:focus {
   outline: none;
   border-color: rgba(var(--rose-rgb), 0.6);
   box-shadow: 0 0 0 3px rgba(var(--rose-rgb), 0.14);

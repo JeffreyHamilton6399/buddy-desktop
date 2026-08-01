@@ -138,9 +138,13 @@ function toChatHistory(messages) {
  *   time. Without it nothing is shown until the model has finished, which on a
  *   local 7B is several seconds of a blank panel — and the voice cannot start
  *   either, since it has nothing to say yet.
+ * @param {AbortSignal} [options.signal] stops generation early. Buddy is
+ *   interrupted by being talked over, and until this existed that only silenced
+ *   the voice — the model carried on to the last token, holding the GPU for an
+ *   answer nobody was going to hear.
  * @returns {Promise<{ message: { role: string, content: string } }>} an Ollama-shaped reply
  */
-function chat({ modelPath, messages, maxTokens, onDelta }) {
+function chat({ modelPath, messages, maxTokens, onDelta, signal }) {
   // One context, one conversation at a time.
   const run = queue.then(async () => {
     const { session } = await load(modelPath);
@@ -162,6 +166,7 @@ function chat({ modelPath, messages, maxTokens, onDelta }) {
       maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : MAX_REPLY_TOKENS,
       temperature: 0.7,
       topP: 0.9,
+      ...(signal ? { signal, stopOnAbortSignal: true } : {}),
       // A throwing listener must not take the generation down with it — the
       // reply is still wanted even if whoever asked to watch has gone away.
       ...(typeof onDelta === 'function'

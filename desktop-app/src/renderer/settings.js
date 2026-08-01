@@ -1293,6 +1293,27 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     setNote(`Answering to “${runtime.identity.wakeWord}”.`);
   });
 
+  /**
+   * Enter has to stay a newline here — this is prose, not a one-line field —
+   * so it commits on blur only, rather than through commitOnSettle.
+   */
+  const aboutField = $('about-you');
+  aboutField.addEventListener('blur', async () => {
+    const value = aboutField.value.trim();
+    if (value === aboutField.dataset.saved) return;
+    if (!(await save({ about: value }))) return;
+    aboutField.dataset.saved = value;
+    renderAboutNote();
+    setNote(value ? `${buddyName()} will remember that.` : `${buddyName()} has forgotten that.`);
+  });
+
+  function renderAboutNote() {
+    const used = (runtime.about || '').length;
+    $('about-you-note').textContent = used
+      ? `${used} of 600 characters, sent with every message.`
+      : 'Optional. Left empty, each conversation starts from nothing.';
+  }
+
   /** Push whatever the server now holds back into every control in this pane. */
   function renderLook() {
     const look = runtime.look || {};
@@ -1303,6 +1324,14 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     wakeField.value = identity.wakeWord || '';
     wakeField.dataset.saved = wakeField.value;
     renderWakeNote();
+
+    // Not overwritten while it has focus: this is a paragraph somebody may be
+    // half way through typing when a poll comes back.
+    if (document.activeElement !== aboutField) {
+      aboutField.value = runtime.about || '';
+      aboutField.dataset.saved = aboutField.value;
+    }
+    renderAboutNote();
 
     $('accent-custom').value = look.accent || '#f43f5e';
     $('theme-choice').value = look.theme || 'dark';

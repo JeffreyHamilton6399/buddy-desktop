@@ -469,6 +469,101 @@ function describeActionResult(result) {
   );
 }
 
+/**
+ * Keep a note of what has fallen out of the window.
+ *
+ * The model is only ever shown the last CONTEXT_MESSAGES turns, so a long
+ * conversation forgets its own beginning — you can tell Buddy your sister's
+ * name and have it gone twenty messages later, which is exactly the sort of
+ * thing that makes an assistant feel stupid.
+ *
+ * So the turns that drop off the back are boiled down to a few lines and
+ * carried in the system prompt instead. It costs one extra generation, which is
+ * why it runs *after* the reply has been sent and nobody is waiting on it, and
+ * why it is skipped entirely for a conversation short enough not to need one.
+ *
+ * Failure here is silent on purpose. A missing summary is a conversation that
+ * remembers slightly less; an error shown to the user would be about machinery
+ * they never asked for.
+ */
+/**
+ * Summarise as soon as anything has fallen out of the window, not later.
+ *
+ * A generous trigger leaves a gap where the earliest turns are already out of
+ * sight and not yet written down — the conversation forgets, and only starts
+ * remembering again several messages afterwards. The first turn to drop off is
+ * the moment the note is needed.
+ */
+const SUMMARY_TRIGGER = CONTEXT_MESSAGES + 2;
+/** How many further messages before it is worth rewriting the note. */
+const SUMMARY_REFRESH_EVERY = 4;
+const SUMMARY_MAX_CHARS = 700;
+
+/**
+ * Ask whichever brain is configured a plain question, with none of the
+ * machinery a real turn carries — no actions, no streaming, no history. For the
+ * jobs Buddy does for itself rather than for the user.
+ */
+async function runModel(settings, messages, { maxTokens } = {}) {
+  if (settings.chat.provider === 'builtin') {
+    const modelId = activeModelId(settings);
+    if (!modelStore.isReady(configDir(), modelId)) throw new Error('the model is not downloaded');
+    return builtin.chat({ modelPath: modelStore.modelPath(configDir(), modelId), messages, maxTokens });
+  }
+  if (settings.chat.provider === 'ollama') {
+    return providers.ollamaChat({ baseUrl: settings.chat.baseUrl, model: settings.chat.model, messages });
+  }
+  if (settings.chat.provider === 'cloud') {
+    const credential = keyStore.get(configDir(), settings.chat.cloudProvider);
+    if (!credential) throw new Error('no API key saved');
+    return cloud.chat({ credential, model: settings.chat.cloudModel, messages, maxTokens });
+  }
+  const zai = await getZai();
+  return zai.chat.completions.create({ messages, thinking: { type: 'disabled' } });
+}
+
+async function updateSummary(conversation, settings) {
+  const total = conversation.messages.length;
+  if (total < SUMMARY_TRIGGER) return;
+  // Only redo it every few messages, rather than on every single turn.
+  if (conversation.summarisedAt && total - conversation.summarisedAt < SUMMARY_REFRESH_EVERY) return;
+
+  // Everything the next request will not be shown, plus what was already known.
+  const dropped = conversation.messages.slice(0, Math.max(0, total - CONTEXT_MESSAGES));
+  if (!dropped.length) return;
+
+  const transcript = dropped
+    .filter((message) => !message.kind)
+    .map((message) => `${message.role === 'assistant' ? 'You' : 'They'}: ${String(message.content || '').slice(0, 400)}`)
+    .join('\n')
+    .slice(-6000);
+  if (!transcript.trim()) return;
+
+  const ask = [
+    {
+      role: 'system',
+      content:
+        'You compress a conversation into notes for your own later reference. ' +
+        'Keep names, facts, decisions, preferences and anything the person asked you to remember. ' +
+        'Drop pleasantries. Write plain sentences, no more than 120 words, no preamble.',
+    },
+    {
+      role: 'user',
+      content:
+        (conversation.summary ? `Notes so far:\n${conversation.summary}\n\n` : '') +
+        `Conversation to fold in:\n${transcript}`,
+    },
+  ];
+
+  const note = await runModel(settings, ask, { maxTokens: 220 });
+  const text = stripThinking(extractReply(note)).trim();
+  if (!text) return;
+
+  conversation.summary = text.slice(0, SUMMARY_MAX_CHARS);
+  conversation.summarisedAt = total;
+  if (settings.saveHistory) await history.persist(conversation);
+}
+
 function streamableProvider(settings) {
   return settings.chat.provider === 'builtin' || settings.chat.provider === 'cloud';
 }
@@ -646,6 +741,7 @@ function describeRuntime() {
     // route of their own.
     look: settings.look,
     identity: settings.identity,
+    about: settings.about,
     orbSizes: providers.ORB_SIZES,
     saveHistory: settings.saveHistory,
     speakReplies: settings.speakReplies,
@@ -1191,6 +1287,21 @@ async function handleChat(req, res) {
   const name = settings.identity.name;
   const basePrompt = spoken ? systemPromptVoice(name) : systemPrompt(name);
 
+  /**
+   * The two things that stop a conversation starting from nothing.
+   *
+   * `about` is what the user wrote about themselves and rides on every request
+   * in every chat. The summary is this conversation's own past — the turns that
+   * have fallen out of the window above — so a long exchange stops quietly
+   * forgetting how it began while still only sending twenty messages.
+   */
+  const remembered = [];
+  const about = String(settings.about || '').trim();
+  if (about) remembered.push(`About the person you are talking to:\n${about}`);
+  if (conversation.summary) {
+    remembered.push(`Earlier in this conversation:\n${conversation.summary}`);
+  }
+
   // Only hand over the action instructions when the last thing said looks like a
   // request to do something — see looksLikeRequest for why carrying them on every
   // turn makes a small model markedly worse at ordinary conversation.
@@ -1207,7 +1318,8 @@ async function handleChat(req, res) {
     settings.allowSystem &&
     (alwaysOffersActions(settings) || actions.looksLikeRequest(lastSaid && lastSaid.content, permissions));
   const withClock = `${clockLine()}\n\n${basePrompt}`;
-  const prompt = wantsAction ? `${withClock}\n\n${actions.instructionsFor(permissions)}` : withClock;
+  const withMemory = remembered.length ? `${withClock}\n\n${remembered.join('\n\n')}` : withClock;
+  const prompt = wantsAction ? `${withMemory}\n\n${actions.instructionsFor(permissions)}` : withMemory;
   const messages = [{ role: 'system', content: prompt }, ...context];
 
   let completion;
@@ -1224,6 +1336,21 @@ async function handleChat(req, res) {
    * until it is complete and half of one is not an instruction.
    */
   const wantsStream = body.stream === true && streamableProvider(settings);
+
+  /**
+   * Stop generating when whoever asked has gone.
+   *
+   * Talking over Buddy used to silence the voice and nothing else: the model
+   * carried on to the last token, holding several gigabytes of graphics card to
+   * finish a sentence that was never going to be heard. The renderer now drops
+   * the request when it is interrupted, and this is the other half — the socket
+   * closing before the reply is finished means nobody is waiting, so the
+   * generation is called off rather than run to completion for nobody.
+   */
+  const abandoned = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) abandoned.abort();
+  });
 
   /**
    * The header is written on the first thing actually sent, not here.
@@ -1288,6 +1415,7 @@ async function handleChat(req, res) {
       messages,
       maxTokens: spoken ? VOICE_REPLY_TOKENS : undefined,
       onDelta,
+      signal: abandoned.signal,
     });
   } else if (settings.chat.provider === 'ollama') {
     completion = await providers.ollamaChat({
@@ -1309,11 +1437,20 @@ async function handleChat(req, res) {
       messages,
       maxTokens: spoken ? VOICE_REPLY_TOKENS : CLOUD_REPLY_TOKENS,
       onDelta,
+      signal: abandoned.signal,
     });
   } else {
     const zai = await getZai();
     completion = await zai.chat.completions.create({ messages, thinking: { type: 'disabled' } });
   }
+
+  /**
+   * Interrupted. The socket is gone, so there is nowhere to send this and
+   * nobody to send it to — and a half-finished answer nobody heard is not worth
+   * keeping in the transcript either. The question stays; the abandoned reply
+   * to it does not.
+   */
+  if (abandoned.signal.aborted) return;
 
   const raw = stripThinking(extractReply(completion));
   if (!raw) throw new Error('The model returned an empty reply');
@@ -1344,6 +1481,16 @@ async function handleChat(req, res) {
     actionRefused: parsed.refused,
   };
 
+  /**
+   * Fold the fallen-off turns into the conversation's notes — after the answer
+   * has gone, never before it. This costs a second generation, and the user
+   * should not wait through it for a reply that is already written.
+   */
+  const remember = () =>
+    updateSummary(conversation, settings).catch((error) =>
+      console.warn('[buddy] could not update the conversation summary:', error.message)
+    );
+
   if (wantsStream) {
     // The reply is sent in full rather than as a last delta. Streaming shows a
     // near-enough version — machinery withheld, markers removed — and this is
@@ -1351,10 +1498,13 @@ async function handleChat(req, res) {
     // any difference between the two resolves in favour of this one.
     beginStream();
     sendEvent(res, { type: 'done', ...answer });
-    return res.end();
+    res.end();
+    remember();
+    return;
   }
 
-  return sendJson(res, 200, answer);
+  sendJson(res, 200, answer);
+  remember();
 }
 
 /**

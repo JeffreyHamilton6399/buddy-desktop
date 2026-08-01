@@ -286,6 +286,8 @@ export function initOrb() {
   let questionTimer = null;
   /** When the orb last left 'wake', so a wedged exchange can be timed out. */
   let modeSince = 0;
+  /** The reply being generated right now, so being talked over can call it off. */
+  let inFlight = null;
   /** Set when the user talks over Buddy, so answer() knows not to reset. */
   let interrupted = false;
   /** Set alongside it, so the next clip reaches back over what they said. */
@@ -502,6 +504,13 @@ export function initOrb() {
     interrupted = true;
     seedDeeply = true;
     speaker.stop();
+    // And stop making any more of it. Silencing the voice while the model runs
+    // on to the last token leaves the machine busy with an answer that has
+    // already been talked over.
+    if (inFlight) {
+      inFlight.abort();
+      inFlight = null;
+    }
     hideToast();
     openQuestionWindow();
   }
@@ -631,11 +640,13 @@ export function initOrb() {
     showToast('Thinking…', false, 0);
 
     try {
-      const payload = await api('/chat', {
-        messages: [{ role: 'user', content: question }],
-        sessionId: activeChatId,
-        voice: true,
-      });
+      inFlight = new AbortController();
+      const payload = await api(
+        '/chat',
+        { messages: [{ role: 'user', content: question }], sessionId: activeChatId, voice: true },
+        { signal: inFlight.signal }
+      );
+      inFlight = null;
 
       if (payload.sessionId && payload.sessionId !== activeChatId) {
         activeChatId = payload.sessionId;
@@ -674,6 +685,10 @@ export function initOrb() {
       const followUp = await acting;
       if (followUp && !interrupted) await speaker.speak(followUp);
     } catch (error) {
+      inFlight = null;
+      // Being talked over calls the request off deliberately; that is not a
+      // fault and must not flash an error where the user is already speaking.
+      if (error.name === 'AbortError') return;
       showToast(error.message.slice(0, 60), true, 4000);
     } finally {
       // Being talked over already moved the orb into listening for what was

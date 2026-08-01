@@ -24,10 +24,16 @@ const ANTHROPIC_VERSION = '2023-06-01';
  */
 const ANTHROPIC_MAX_TOKENS = 4096;
 
-function withTimeout(ms) {
+/**
+ * A signal that fires on the timeout, or when the caller gives up — whichever
+ * comes first. The caller giving up is a user who has stopped listening, and
+ * there is no reason to keep paying a provider to finish a sentence for them.
+ */
+function withTimeout(ms, caller) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  return { signal: controller.signal, done: () => clearTimeout(timer) };
+  const signal = caller ? AbortSignal.any([controller.signal, caller]) : controller.signal;
+  return { signal, done: () => clearTimeout(timer) };
 }
 
 // ── pictures ──────────────────────────────────────────────────────────────
@@ -98,8 +104,8 @@ function readError(status, body) {
  *
  * @param {(data: string) => void} onData one `data:` payload, still unparsed
  */
-async function postSse(url, { headers, body, onData, timeoutMs = REQUEST_TIMEOUT_MS }) {
-  const { signal, done } = withTimeout(timeoutMs);
+async function postSse(url, { headers, body, onData, signal: caller, timeoutMs = REQUEST_TIMEOUT_MS }) {
+  const { signal, done } = withTimeout(timeoutMs, caller);
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -136,8 +142,8 @@ async function postSse(url, { headers, body, onData, timeoutMs = REQUEST_TIMEOUT
   }
 }
 
-async function post(url, { headers, body, timeoutMs = REQUEST_TIMEOUT_MS }) {
-  const { signal, done } = withTimeout(timeoutMs);
+async function post(url, { headers, body, signal: caller, timeoutMs = REQUEST_TIMEOUT_MS }) {
+  const { signal, done } = withTimeout(timeoutMs, caller);
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -159,9 +165,10 @@ async function post(url, { headers, body, timeoutMs = REQUEST_TIMEOUT_MS }) {
 
 // ── the OpenAI /chat/completions shape ────────────────────────────────────
 
-async function openAiChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta }) {
+async function openAiChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta, signal }) {
   let text = '';
   await postSse(`${baseUrl}/chat/completions`, {
+    signal,
     headers: keys.authHeaders('openai', apiKey),
     body: {
       model,
@@ -186,10 +193,11 @@ async function openAiChatStream({ baseUrl, apiKey, model, messages, maxTokens, o
   return { message: { role: 'assistant', content: text.trim() } };
 }
 
-async function anthropicChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta }) {
+async function anthropicChatStream({ baseUrl, apiKey, model, messages, maxTokens, onDelta, signal }) {
   const { system, conversation } = splitAnthropic(messages);
   let text = '';
   await postSse(`${baseUrl}/messages`, {
+    signal,
     headers: keys.authHeaders('anthropic', apiKey),
     body: {
       model,
@@ -217,8 +225,9 @@ async function anthropicChatStream({ baseUrl, apiKey, model, messages, maxTokens
   return { message: { role: 'assistant', content: text.trim() } };
 }
 
-async function openAiChat({ baseUrl, apiKey, model, messages, maxTokens }) {
+async function openAiChat({ baseUrl, apiKey, model, messages, maxTokens, signal }) {
   const payload = await post(`${baseUrl}/chat/completions`, {
+    signal,
     headers: keys.authHeaders('openai', apiKey),
     body: {
       model,
@@ -262,10 +271,11 @@ function splitAnthropic(messages) {
   return { system, conversation };
 }
 
-async function anthropicChat({ baseUrl, apiKey, model, messages }) {
+async function anthropicChat({ baseUrl, apiKey, model, messages, signal }) {
   const { system, conversation: turns } = splitAnthropic(messages);
 
   const payload = await post(`${baseUrl}/messages`, {
+    signal,
     headers: keys.authHeaders('anthropic', apiKey),
     body: {
       model,
@@ -300,7 +310,7 @@ async function anthropicChat({ baseUrl, apiKey, model, messages }) {
  *           maxTokens?: number }} options
  * @returns {Promise<object>} a reply extractReply() understands
  */
-async function chat({ credential, model, messages, maxTokens, onDelta }) {
+async function chat({ credential, model, messages, maxTokens, onDelta, signal }) {
   if (!credential || !credential.apiKey) {
     throw Object.assign(new Error('That provider has no API key saved. Add one in settings.'), {
       code: 'NO_KEY',
@@ -314,7 +324,7 @@ async function chat({ credential, model, messages, maxTokens, onDelta }) {
   if (!chosen) throw new Error('No model is chosen for that provider. Pick one in settings.');
 
   const streaming = typeof onDelta === 'function';
-  const common = { baseUrl, apiKey: credential.apiKey, model: chosen, messages };
+  const common = { baseUrl, apiKey: credential.apiKey, model: chosen, messages, signal };
 
   if (credential.style === 'anthropic') {
     return streaming

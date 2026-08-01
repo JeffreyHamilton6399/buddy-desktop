@@ -84,7 +84,7 @@ export function serverUrl(route) {
   return `http://127.0.0.1:${boot.port}${route}`;
 }
 
-export async function api(route, body, { raw = false, method } = {}) {
+export async function api(route, body, { raw = false, method, signal } = {}) {
   const response = await fetch(serverUrl(route), {
     method: method || (body === undefined ? 'GET' : 'POST'),
     headers: {
@@ -92,6 +92,9 @@ export async function api(route, body, { raw = false, method } = {}) {
       'X-Buddy-Token': boot.token || '',
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    // Dropping the request is how a caller calls off work already under way —
+    // the server watches for the socket closing and stops generating.
+    signal,
   });
 
   if (!response.ok) {
@@ -124,11 +127,14 @@ export async function api(route, body, { raw = false, method } = {}) {
  * and the server says so by replying with ordinary JSON, which is handled here
  * rather than by every caller.
  */
-export async function streamChat(body, { onDelta } = {}) {
+export async function streamChat(body, { onDelta, signal } = {}) {
   const response = await fetch(serverUrl('/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Buddy-Token': boot.token || '' },
     body: JSON.stringify({ ...body, stream: true }),
+    // Dropping this request is what tells the server to stop generating; see
+    // the abort handling in handleChat.
+    signal,
   });
 
   if (!response.ok) {
