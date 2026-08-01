@@ -991,7 +991,7 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       empty.className = 'pane-lede';
       empty.textContent =
         runtime.providers.asr === 'off'
-          ? 'Listening is off, so Buddy is not hearing anything.'
+          ? `Listening is off, so ${buddyName()} is not hearing anything.`
           : 'Nothing yet. Say something near the microphone and it will appear here.';
       list.appendChild(empty);
       return;
@@ -1348,11 +1348,44 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
    * deliberately not here: renderAsset owns those and repaints them on a poll,
    * so anything written from this side would be wiped within the second.
    */
+  /**
+   * Everything in the panel that says Buddy's name out loud.
+   *
+   * This covered three labels and missed six, which only became obvious once
+   * renaming could be done by voice: an assistant called Jeff was still
+   * offering "Buddy's own ears" and "Off — Buddy cannot hear at all", two
+   * controls away from a header reading Jeff. A rename that leaves the old name
+   * lying around the settings reads as a rename that did not work.
+   */
   function applyNaming() {
     const phrase = wakePhrase();
+    const name = buddyName();
+
     $('wake-toggle-label').textContent = `Answer to “${phrase}”`;
     $('mic-test').textContent = `Test “${phrase}”`;
     $('probe-match-label').textContent = `Matched “${phrase}”`;
+
+    /**
+     * Everything else carries its own wording as a template, so adding a
+     * heading that names Buddy needs no line here — just the attribute. The
+     * markup keeps the default text too, so the file still reads correctly to
+     * anybody looking at it rather than being a page full of placeholders.
+     */
+    for (const element of document.querySelectorAll('[data-name-template]')) {
+      element.textContent = element.dataset.nameTemplate.replace(/\{name\}/g, name);
+    }
+
+    // The provider pickers name Buddy in the options that mean "in this app".
+    const option = (selectId, value) => $(selectId).querySelector(`option[value="${value}"]`);
+    const own = [
+      [option('tts-provider', 'kokoro'), `${name}'s own voice — neural, on this machine`],
+      [option('asr-provider', 'local'), `${name}'s own ears — Whisper, on this machine`],
+      [option('asr-provider', 'off'), `Off — ${name} cannot hear at all`],
+    ];
+    for (const [element, text] of own) if (element) element.textContent = text;
+
+    $('save-history-note').textContent = `Stored as a plain file in ${name}'s own folder. Nothing is uploaded.`;
+    $('memory-add-text').placeholder = `Tell ${name} something to remember…`;
   }
 
   // ── chats ───────────────────────────────────────────────────────────────
@@ -1363,6 +1396,11 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       return;
     }
     setNote(event.target.checked ? 'New chats will be kept.' : 'Nothing new will be saved.');
+    // Remembering rides on saving, so the Memory pane has just changed meaning
+    // even though nobody touched it. Say so now rather than on the next poll.
+    memoryState.saveHistory = event.target.checked;
+    memoryState.enabled = event.target.checked && memoryState.wanted;
+    drawMemory();
   });
 
   let clearArmed = false;
@@ -1406,6 +1444,314 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     } catch {
       $('chat-count').textContent = '';
     }
+  }
+
+  // ── the keys that always work ───────────────────────────────────────────
+
+  /**
+   * The global shortcuts, written the way this machine writes them.
+   *
+   * Kept in step with SHORTCUTS in main.js by hand. That is a duplication, but
+   * the alternative is shipping the accelerator strings to the renderer and
+   * parsing Electron's format here, which is more machinery than two lines of
+   * text are worth.
+   */
+  function renderShortcuts() {
+    const mac = boot.platform === 'darwin';
+    const mod = mac ? '⌘' : 'Ctrl';
+    const shift = mac ? '⇧' : 'Shift';
+    const rows = [
+      [[mod, shift, 'Space'], `Open ${buddyName()}, ready to type`],
+      // Cmd+Shift+. is Finder's show-hidden-files, so macOS gets a different
+      // key — see SILENCE_KEY in main.js, which this has to stay in step with.
+      [mac ? ['⌘', '⌃', '.'] : [mod, shift, '.'], 'Stop talking'],
+    ];
+
+    const list = $('shortcut-list');
+    list.replaceChildren();
+    for (const [keys, what] of rows) {
+      const row = document.createElement('div');
+      row.className = 'key-row';
+
+      const combo = document.createElement('span');
+      combo.className = 'key-combo';
+      keys.forEach((key, index) => {
+        if (index) combo.append(document.createTextNode('+'));
+        const kbd = document.createElement('kbd');
+        kbd.textContent = key;
+        combo.append(kbd);
+      });
+
+      const label = document.createElement('span');
+      label.className = 'key-what';
+      label.textContent = what;
+
+      row.append(combo, label);
+      list.append(row);
+    }
+  }
+
+  // ── memory ──────────────────────────────────────────────────────────────
+  //
+  // The list is not a readout of a feature happening elsewhere; it is the part
+  // that makes the feature allowable. Buddy holding opinions about somebody is
+  // fine as long as they can read every one, correct it and throw it away, so
+  // editing is in place, deleting is one click, and nothing is summarised or
+  // hidden behind a disclosure.
+
+  /** What the server last told us, so a redraw does not need a round trip. */
+  let memoryState = { facts: [], enabled: true, wanted: true, saveHistory: true };
+
+  const icon = (path) => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    shape.setAttribute('d', path);
+    svg.append(shape);
+    return svg;
+  };
+
+  const PIN_PATH = 'M7 4h10a2 2 0 0 1 2 2v14l-7-3.5L5 20V6a2 2 0 0 1 2-2z';
+  const BIN_PATH = 'M5 7h14M10 7V5h4v2M8 7l1 12h6l1-12';
+
+  /** "3 days ago" beats a timestamp for something whose age is all that matters. */
+  function whenish(iso) {
+    const at = Date.parse(iso || '');
+    if (!Number.isFinite(at)) return '';
+    const days = Math.floor((Date.now() - at) / 86400000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 30) return `${days} days ago`;
+    const months = Math.round(days / 30);
+    return months < 12 ? `${months} month${months === 1 ? '' : 's'} ago` : 'over a year ago';
+  }
+
+  async function patchFact(id, changes, onFail) {
+    try {
+      await api(`/memory/${id}`, changes, { method: 'PATCH' });
+      return true;
+    } catch (error) {
+      setNote(error.message, true);
+      if (onFail) onFail();
+      return false;
+    }
+  }
+
+  function memoryRow(fact) {
+    const row = document.createElement('div');
+    row.className = `memory-row${fact.pinned ? ' is-pinned' : ''}`;
+
+    const main = document.createElement('div');
+    main.className = 'memory-row-main';
+
+    /*
+     * contenteditable rather than an <input>: a fact can run to two lines, and a
+     * single-line box that scrolls sideways is a poor place to reread something
+     * you are deciding whether to keep. Saved on blur, the same as the About
+     * note, and Enter is a save rather than a newline because one fact is one
+     * sentence.
+     */
+    const text = document.createElement('div');
+    text.className = 'memory-text';
+    text.contentEditable = 'plaintext-only';
+    text.spellcheck = false;
+    text.role = 'textbox';
+    text.textContent = fact.text;
+    text.dataset.saved = fact.text;
+
+    text.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        text.blur();
+      }
+      if (event.key === 'Escape') {
+        text.textContent = text.dataset.saved;
+        text.blur();
+      }
+    });
+
+    text.addEventListener('blur', async () => {
+      const value = text.textContent.replace(/\s+/g, ' ').trim();
+      if (value === text.dataset.saved) return;
+      if (!value) {
+        // Emptying a fact is not how it is deleted — there is a button for that,
+        // and silently deleting on blur would make a stray ctrl-A destructive.
+        text.textContent = text.dataset.saved;
+        return;
+      }
+      const ok = await patchFact(fact.id, { text: value }, () => {
+        text.textContent = text.dataset.saved;
+      });
+      if (!ok) return;
+      text.dataset.saved = value;
+      fact.text = value;
+      // The conversation it came from no longer explains a sentence the user
+      // has rewritten, and the server drops it — so stop claiming it here too.
+      fact.source = null;
+      source.textContent = sourceLine(fact);
+      setNote('Reworded.');
+    });
+
+    const source = document.createElement('small');
+    source.className = 'memory-source';
+    source.textContent = sourceLine(fact);
+
+    main.append(text, source);
+
+    const pin = document.createElement('button');
+    pin.type = 'button';
+    pin.className = `memory-row-act${fact.pinned ? ' is-on' : ''}`;
+    pin.title = fact.pinned ? 'Always remembered — click to unpin' : 'Always remember this';
+    pin.setAttribute('aria-label', pin.title);
+    pin.setAttribute('aria-pressed', String(Boolean(fact.pinned)));
+    pin.append(icon(PIN_PATH));
+    pin.addEventListener('click', async () => {
+      const next = !fact.pinned;
+      if (!(await patchFact(fact.id, { pinned: next }))) return;
+      fact.pinned = next;
+      row.classList.toggle('is-pinned', next);
+      pin.classList.toggle('is-on', next);
+      pin.setAttribute('aria-pressed', String(next));
+      pin.title = next ? 'Always remembered — click to unpin' : 'Always remember this';
+      pin.setAttribute('aria-label', pin.title);
+      setNote(next ? `${buddyName()} will always keep that in mind.` : 'No longer pinned.');
+    });
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'memory-row-act del';
+    del.title = 'Forget this';
+    del.setAttribute('aria-label', `Forget: ${fact.text}`);
+    del.append(icon(BIN_PATH));
+    del.addEventListener('click', async () => {
+      try {
+        await api(`/memory/${fact.id}`, undefined, { method: 'DELETE' });
+      } catch (error) {
+        return setNote(error.message, true);
+      }
+      memoryState.facts = memoryState.facts.filter((entry) => entry.id !== fact.id);
+      drawMemory();
+      setNote('Forgotten.');
+    });
+
+    row.append(main, pin, del);
+    return row;
+  }
+
+  /** Where a fact came from, which is the answer to "why does it think that?". */
+  function sourceLine(fact) {
+    const when = whenish(fact.at);
+    if (!fact.source || !fact.source.title) return when ? `You told ${buddyName()} this, ${when}` : 'You wrote this';
+    return `From “${fact.source.title}”${when ? `, ${when}` : ''}`;
+  }
+
+  /** Redraw from `memoryState` alone — no request, so edits feel immediate. */
+  function drawMemory() {
+    const { facts, enabled, wanted, saveHistory } = memoryState;
+
+    $('memory-enabled').checked = Boolean(wanted);
+    $('memory-enabled').closest('.switch').classList.toggle('is-paused', Boolean(wanted) && !saveHistory);
+    // The switch can be on while nothing is being remembered, and saying so is
+    // better than showing it off and letting somebody wonder who moved it.
+    $('memory-switch-note').textContent = !saveHistory
+      ? `Paused: ${buddyName()} only remembers while chats are being saved — turn that back on at the top of this page.`
+      : enabled
+        ? `${buddyName()} notes what seems worth keeping and uses it in later chats. Everything it remembers is listed below.`
+        : `Off — ${buddyName()} starts every conversation knowing only what you have written here.`;
+
+    $('memory-count').textContent = facts.length
+      ? `${facts.length} thing${facts.length === 1 ? '' : 's'} remembered. Click any of them to correct it.`
+      : '';
+
+    const list = $('memory-list');
+    list.replaceChildren();
+    if (!facts.length) {
+      const empty = document.createElement('p');
+      empty.className = 'memory-empty';
+      empty.textContent = enabled
+        ? `Nothing yet. ${buddyName()} will note things as you talk — or tell it something above.`
+        : `Nothing remembered.`;
+      list.append(empty);
+    } else {
+      for (const fact of facts) list.append(memoryRow(fact));
+    }
+
+    $('memory-clear').hidden = !facts.length;
+  }
+
+  $('memory-enabled').addEventListener('change', async (event) => {
+    const wanted = event.target.checked;
+    if (!(await save({ memory: { enabled: wanted, max: memoryState.max } }))) {
+      event.target.checked = !wanted;
+      return;
+    }
+    memoryState.wanted = wanted;
+    memoryState.enabled = wanted && memoryState.saveHistory;
+    drawMemory();
+    setNote(
+      wanted
+        ? memoryState.saveHistory
+          ? `${buddyName()} will remember things as you talk.`
+          : `Saved — but ${buddyName()} cannot remember while chats are not being kept.`
+        : `${buddyName()} will stop noting things down. What it already knows is kept below.`
+    );
+  });
+
+  $('memory-add').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const field = $('memory-add-text');
+    const text = field.value.trim();
+    if (!text) return;
+    try {
+      const { updated } = await api('/memory', { text });
+      field.value = '';
+      setNote(updated ? `${buddyName()} already knew something like that, and updated it.` : 'Remembered.');
+      await renderMemory();
+    } catch (error) {
+      setNote(error.message, true);
+    }
+  });
+
+  let forgetArmed = false;
+  const forgetButton = $('memory-clear');
+
+  function resetForget() {
+    forgetArmed = false;
+    forgetButton.classList.remove('confirming');
+    forgetButton.textContent = 'Forget everything';
+  }
+
+  forgetButton.addEventListener('click', async () => {
+    // Same second tap as deleting every chat, and for the same reason: there is
+    // nothing behind this one either.
+    if (!forgetArmed) {
+      forgetArmed = true;
+      forgetButton.classList.add('confirming');
+      forgetButton.textContent = 'Really forget all of it?';
+      setTimeout(() => {
+        if (forgetArmed) resetForget();
+      }, 4000);
+      return;
+    }
+    try {
+      const { deleted } = await api('/memory', undefined, { method: 'DELETE' });
+      setNote(`Forgot ${deleted} thing${deleted === 1 ? '' : 's'}.`);
+    } catch (error) {
+      setNote(error.message, true);
+    }
+    resetForget();
+    await renderMemory();
+  });
+
+  async function renderMemory() {
+    try {
+      const state = await api('/memory');
+      memoryState = state;
+    } catch {
+      /* leave the pane showing what it last knew rather than blanking it */
+    }
+    drawMemory();
   }
 
   // ── about ───────────────────────────────────────────────────────────────
@@ -1477,6 +1823,21 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
       ? 'Nothing you say or type leaves this machine.'
       : 'Some of what you say is sent to a cloud API.';
     facts.appendChild(summary);
+
+    /*
+     * The one consequence of remembering that is not obvious from the Memory
+     * pane. Recalled facts are part of the instructions the model is given, so
+     * a cloud brain is sent them along with the question — which is exactly
+     * what the pane exists to make checkable rather than assumed.
+     */
+    if (!isLocal(runtime.providers.chat) && memoryState.enabled && memoryState.facts.length) {
+      const carried = document.createElement('p');
+      carried.className = 'pane-lede';
+      carried.textContent =
+        `Because the thinking is done in the cloud, what ${buddyName()} remembers about you is sent ` +
+        'there too, with any message it turns out to be relevant to. Memory has the list.';
+      facts.appendChild(carried);
+    }
   }
 
   $('open-folder').addEventListener('click', () => window.buddy.openConfigFolder());
@@ -1519,8 +1880,11 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     renderLook();
     renderKeys();
     $('whisper-url').value = runtime.asrBaseUrl || '';
+    renderShortcuts();
+    await Promise.all([renderModels(), renderAssets(), renderChats(), renderMemory(), renderHeard()]);
+    // After the others, not before: the About pane's note about memories going
+    // to a cloud brain needs the memory state that renderMemory has just fetched.
     renderAbout();
-    await Promise.all([renderModels(), renderAssets(), renderChats(), renderHeard()]);
     if ((runtime.providers.tts === 'kokoro' || runtime.providers.tts === 'cloud') && !voicesLoaded) await loadVoices();
     if (runtime.providers.tts === 'system') loadSystemVoices();
   }

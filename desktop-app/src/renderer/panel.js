@@ -120,9 +120,130 @@ export function initPanel() {
     else if (content) bubble.appendChild(document.createTextNode(content));
 
     row.appendChild(bubble);
+    // Only a real answer gets them: not a typing placeholder, not an error, and
+    // not the note that says what an action did.
+    if (role === 'buddy' && content) row.appendChild(replyActions(row, content));
     messages.appendChild(row);
     scrollToEnd();
     return bubble;
+  }
+
+  const COPY_PATH = 'M9 9h10v10H9zM5 15V5h10';
+  const RETRY_PATH = 'M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4';
+
+  function actionButton(label, pathData, onUse) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'msg-act';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    shape.setAttribute('d', pathData);
+    svg.append(shape);
+    button.append(svg);
+    button.addEventListener('click', () => onUse(button));
+    return button;
+  }
+
+  /**
+   * The two things you could not do to an answer at all.
+   *
+   * Getting text out of a 420px window meant dragging a selection through it,
+   * and a bad answer meant retyping the question — which also left the bad one
+   * sitting in the transcript underneath the new one.
+   *
+   * Shown on hover rather than always: a row of controls under every message
+   * turns a conversation into a form.
+   */
+  function replyActions(row, text) {
+    const tray = document.createElement('div');
+    tray.className = 'msg-acts';
+
+    tray.append(
+      actionButton('Copy', COPY_PATH, (button) => {
+        // Through the main process, not navigator.clipboard: the web API is
+        // refused on a custom-protocol page, so it failed every single time
+        // while looking like an ordinary permission prompt that never appeared.
+        window.buddy.copyText(text);
+        button.classList.add('done');
+        setTimeout(() => button.classList.remove('done'), 1200);
+      })
+    );
+
+    // Only the newest answer can be retried — replacing one from the middle of
+    // a conversation would orphan everything said after it.
+    tray.append(
+      actionButton('Answer again', RETRY_PATH, () => {
+        if (row !== messages.lastElementChild) return;
+        retryLastReply(row);
+      })
+    );
+
+    return tray;
+  }
+
+  /**
+   * Ask the same question again, and put the new answer where the old one was.
+   *
+   * The server drops the trailing assistant turn before generating, so the
+   * rejected answer is neither shown to the model nor left in the transcript.
+   */
+  async function retryLastReply(row) {
+    if (busy) return;
+    row.remove();
+    setBusy(true);
+    setStatus('thinking', 'busy');
+
+    const typingRow = addTyping();
+    const liveBubble = typingRow.querySelector('.bubble');
+    let live = '';
+    let painting = false;
+    const paint = () => {
+      painting = false;
+      liveBubble.innerHTML = renderMarkdown(live);
+      scrollToEnd();
+    };
+
+    const voice = startSpeaking();
+    inFlight = new AbortController();
+    try {
+      const payload = await streamChat(
+        { sessionId, retry: true },
+        {
+          signal: inFlight.signal,
+          onDelta: (piece) => {
+            if (!piece) return;
+            live += piece;
+            if (voice) voice.push(live);
+            if (painting) return;
+            painting = true;
+            requestAnimationFrame(paint);
+          },
+        }
+      );
+      inFlight = null;
+      typingRow.remove();
+      addMessage('buddy', payload.reply, { markdown: true });
+      setBusy(false);
+      setStatus('online');
+      if (voice) voice.end(payload.reply);
+      else speak(payload.reply);
+      await performAction(payload);
+    } catch (error) {
+      inFlight = null;
+      if (voice) voice.end('');
+      typingRow.remove();
+      setBusy(false);
+      setStatus('online');
+      if (error.name === 'AbortError') {
+        if (live.trim()) addMessage('buddy', live, { markdown: true });
+        return;
+      }
+      addMessage('error', error.message);
+    }
   }
 
   function addTyping() {
@@ -142,6 +263,22 @@ export function initPanel() {
     // rather than a per-window preference behind an unlabelled icon.
     if (runtime.speakReplies === false || !String(text || '').trim()) return;
     speaker.speak(text);
+  }
+
+  /**
+   * Start saying a reply that has not been written yet.
+   *
+   * Speaking used to wait for the last token, so the delay before Buddy made a
+   * sound was the whole generation *plus* the first chunk of synthesis, one
+   * after the other. Feeding the voice as the text arrives overlaps them: by
+   * the time the model has finished, the opening sentence has usually already
+   * been said.
+   *
+   * Returns null when replies are muted, so callers can skip the bookkeeping.
+   */
+  function startSpeaking() {
+    if (runtime.speakReplies === false) return null;
+    return speaker.speakStream();
   }
 
   // ── pictures ────────────────────────────────────────────────────────────
@@ -366,9 +503,14 @@ export function initPanel() {
       scrollToEnd();
     };
 
+    // Begun before the request, so the first settled sentence can be sent to the
+    // voice the moment it exists rather than after the last token.
+    const voice = startSpeaking();
+
     const onDelta = (piece) => {
       if (!piece) return;
       live += piece;
+      if (voice) voice.push(live);
       if (painting) return;
       painting = true;
       requestAnimationFrame(paint);
@@ -386,10 +528,12 @@ export function initPanel() {
       addMessage('buddy', payload.reply, { markdown: true });
       setBusy(false);
       setStatus('online');
-      speak(payload.reply);
+      if (voice) voice.end(payload.reply);
+      else speak(payload.reply);
       await performAction(payload);
     } catch (error) {
       inFlight = null;
+      if (voice) voice.end('');
       typingRow.remove();
       // Being called off is not a failure worth an error bubble — the user did
       // it on purpose, and whatever had arrived is left where it was.
@@ -495,6 +639,7 @@ export function initPanel() {
         scrollToEnd();
       };
 
+      const voice = startSpeaking();
       try {
         current = await streamChat(
           { messages: [], sessionId, actionResult: result },
@@ -502,6 +647,7 @@ export function initPanel() {
             onDelta: (piece) => {
               if (!piece) return;
               live += piece;
+              if (voice) voice.push(live);
               if (painting) return;
               painting = true;
               requestAnimationFrame(paint);
@@ -512,8 +658,10 @@ export function initPanel() {
         setSession(current.sessionId || sessionId);
         if (current.reply) addMessage('buddy', current.reply, { markdown: true });
         if (current.actionRefused) addMessage('note', current.actionRefused);
-        speak(current.reply);
+        if (voice) voice.end(current.reply);
+        else speak(current.reply);
       } catch (error) {
+        if (voice) voice.end('');
         typingRow.remove();
         addMessage('error', error.message);
         return;
@@ -960,6 +1108,18 @@ export function initPanel() {
     event.preventDefault();
     window.buddy.openExternal(link.getAttribute('href'));
   });
+
+  /**
+   * The summon shortcut. onPanelVisibility already focuses the box when the
+   * panel goes from hidden to shown, so this is the case that would otherwise
+   * be missed: the panel is already open, buried behind something, and the
+   * shortcut brings it forward with the cursor where it should be.
+   */
+  window.buddy.onFocusComposer(() => setTimeout(() => input.focus(), 40));
+
+  // Stop talking, from anywhere on the machine, whether or not this window has
+  // focus. Harmless when it is already quiet.
+  window.buddy.onSilence(() => speaker.stop());
 
   window.buddy.onPanelVisibility((visible) => {
     if (visible) {

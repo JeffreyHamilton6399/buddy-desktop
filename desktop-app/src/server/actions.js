@@ -174,6 +174,44 @@ const ACTIONS = {
     describeDone: (value) => `Opened Buddy's ${value} folder`,
   },
 
+  /**
+   * What it is called.
+   *
+   * This exists because of what happened without it. Asked out loud to change
+   * its name, a model with file access reached for the only tool it had and
+   * wrote `{"assistant_name": "Jeff"}` into a config.json of its own invention
+   * — a file nothing reads — and then said "Okay, I'll write to config.json",
+   * which sounds like success. Four times, on four attempts.
+   *
+   * A model asked to do something it has no way to do will not say so; it will
+   * find the nearest thing it *can* do and describe that as the job. The fix is
+   * not a better refusal, it is giving it the real action.
+   */
+  set_name: {
+    summary: 'change what it is called',
+    validate(argument) {
+      // The same shape providers.normaliseName enforces, checked here because
+      // this is the boundary and it should not depend on a later caller.
+      // Trimmed before unquoting, not after: a model that writes ` "Ada" `
+      // puts the space outside the quote, so an anchored pattern misses it
+      // and the name is kept with its punctuation still attached.
+      const name = String(argument || '')
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^["'`<(]+|["'`>)]+$/g, '')
+        .trim()
+        .slice(0, 24);
+      if (!name) return { ok: false, error: 'no name was given' };
+      // A name has to be sayable: the wake word is built out of it, and Whisper
+      // will never hand back a string of punctuation.
+      if (!/[a-z]/i.test(name)) return { ok: false, error: 'that is not a name it could answer to' };
+      return { ok: true, value: name };
+    },
+    describe: (value) => `call itself ${value}`,
+    describeDone: (value) => `Now called ${value}`,
+  },
+
   // ── files, and only inside folders the user has named ───────────────────
 
   read_file: {
@@ -292,6 +330,14 @@ const TOOL_SCHEMAS = {
     properties: { folder: { type: 'string', enum: ['models', 'chats', 'config'] } },
     required: ['folder'],
     toArgument: (args) => args.folder,
+  },
+  set_name: {
+    description:
+      'Change your own name — what you are called in the app and what you answer to out loud. ' +
+      'This is the ONLY way to rename yourself. Writing a config file does not rename you.',
+    properties: { name: { type: 'string', description: 'The new name on its own, e.g. "Jeff"' } },
+    required: ['name'],
+    toArgument: (args) => args.name,
   },
   read_file: {
     description: 'Read a text file and get its contents back. Use this before answering questions about a file.',
@@ -420,6 +466,7 @@ const ACTION_INSTRUCTIONS =
   '  [[open_url: FULL WEB ADDRESS]]\n' +
   '  [[search_web: WORDS TO SEARCH FOR]]\n' +
   '  [[open_folder: models]]   (or chats, or config)\n' +
+  '  [[set_name: NEW NAME]]\n' +
   '\n' +
   // These stay as a labelled dialogue. Rewriting them as prose ("Asked to open
   // the BBC website, write:") dropped the model from five hits in six to one:
@@ -443,6 +490,10 @@ const ACTION_INSTRUCTIONS =
   'You: Searching for that.\n' +
   '[[search_web: tide times]]\n' +
   '\n' +
+  'User: from now on your name is Jeff\n' +
+  'You: Done — I\'m Jeff now.\n' +
+  '[[set_name: Jeff]]\n' +
+  '\n' +
   'User: what is the capital of France?\n' +
   'You: The capital of France is Paris.\n' +
   '\n' +
@@ -451,7 +502,16 @@ const ACTION_INSTRUCTIONS =
   '\n' +
   'You cannot choose which browser is used — pages open in whichever one this ' +
   'computer uses by default. If asked for a particular browser, open the page ' +
-  'anyway and say which browser it will actually use.';
+  'anyway and say which browser it will actually use.\n' +
+  '\n' +
+  // Written flatly because the failure it prevents was flat: given file access
+  // and asked to rename itself, the model invented a config.json, wrote a name
+  // into it, and reported that as having done the job.
+  'Your own settings are NOT files. Renaming yourself is [[set_name: …]] and ' +
+  'nothing else — writing a name into a config file changes nothing and is ' +
+  'never the answer. If you are asked to change something about yourself that ' +
+  'has no marker above, say plainly that it has to be done in Settings. Never ' +
+  'describe a file you wrote as though it did the thing that was asked.';
 
 /**
  * Does this message plausibly ask Buddy to *do* something?
@@ -469,13 +529,26 @@ const ACTION_INSTRUCTIONS =
 const REQUEST_PATTERN =
   /\b(open|opens|opening|launch|start up|go to|goto|visit|browse|pull up|bring up|take me to|show me|search|searching|look up|lookup|google|duckduckgo|find me|download)\b/i;
 
+/**
+ * Being asked to answer to something else.
+ *
+ * Separate from the two below because it is not about opening or about files,
+ * and because it has to fire on phrasings that mention neither: "your name is
+ * Jeff", "answer to Jarvis", "I'm going to call you Ada". Without this the
+ * instructions are withheld from exactly the turn that needs them, and the
+ * model falls back on whatever else it can reach — which, when that was a file
+ * writer, is how config.json got invented.
+ */
+const RENAME_PATTERN =
+  /\b(?:your|you'?re|yer)\s+name\b|\b(?:re)?name\s+your\s?self\b|\bcall\s+(?:you|yourself)\b|\bcalling\s+you\b|\banswer\s+to\b|\bgo\s+by\b/i;
+
 /** The same idea for files: verbs about reading, writing and getting rid of them. */
 const FILE_REQUEST_PATTERN =
   /\b(file|files|folder|directory|note|notes|write|writes|writing|save|saves|saving|edit|edits|editing|append|add to|create|read|list|rename|delete|deletes|deleting|remove|removes|removing|erase|bin|trash|get rid of|throw away|txt|markdown|\.md)\b/i;
 
 function looksLikeRequest(text, { allowSystem = false } = {}) {
   const source = String(text || '');
-  if (REQUEST_PATTERN.test(source)) return true;
+  if (REQUEST_PATTERN.test(source) || RENAME_PATTERN.test(source)) return true;
   return allowSystem && FILE_REQUEST_PATTERN.test(source);
 }
 

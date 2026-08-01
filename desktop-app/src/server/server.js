@@ -32,6 +32,11 @@
  *   PATCH  /chats/:id           rename one conversation
  *   DELETE /chats/:id           delete one conversation
  *   DELETE /chats               delete every conversation
+ *   GET    /memory              what Buddy remembers about the user
+ *   POST   /memory              remember one thing, written by hand
+ *   PATCH  /memory/:id          reword one, or pin it
+ *   DELETE /memory/:id          forget one
+ *   DELETE /memory              forget everything
  */
 'use strict';
 
@@ -52,6 +57,7 @@ const voice = require('./voice.js');
 const hearing = require('./hearing.js');
 const audio = require('./audio.js');
 const { History } = require('./history.js');
+const { Memory, parseExtraction } = require('./memory.js');
 
 // ── SDK facts, verified against z-ai-web-dev-sdk@0.0.18 ────────────────────
 // The published spec guessed at these; the real package differs, so:
@@ -143,6 +149,7 @@ function configDir() {
 }
 
 const history = new History(configDir);
+const memory = new Memory(configDir);
 
 // ── z-ai credentials ──────────────────────────────────────────────────────
 
@@ -561,6 +568,111 @@ async function updateSummary(conversation, settings) {
 
   conversation.summary = text.slice(0, SUMMARY_MAX_CHARS);
   conversation.summarisedAt = total;
+  if (settings.saveHistory) await history.persist(conversation);
+}
+
+/**
+ * Somebody asking to be remembered, rather than merely saying something
+ * memorable.
+ *
+ * "Do you remember what I said" trips this too, and that is the right trade:
+ * the cost of a false positive is one background generation that finds nothing
+ * worth keeping, while the cost of a false negative is Buddy being told
+ * outright to remember something and not doing it — which is the single most
+ * damning thing this feature could do.
+ */
+const ASKED_TO_REMEMBER = /\b(remember|don'?t forget|keep in mind|bear in mind|make a note|note that)\b/i;
+
+/** How much of the conversation an explicit "remember this" looks back over. */
+const EXPLICIT_LOOKBACK = 4;
+
+function transcribeFor(messages) {
+  return messages
+    // Never the output of an action. Without this the contents of a file Buddy
+    // was asked to read become permanent facts about the person who asked.
+    .filter((message) => !message.kind)
+    .map((message) => `${message.role === 'assistant' ? 'You' : 'They'}: ${String(message.content || '').slice(0, 400)}`)
+    .join('\n')
+    .slice(-6000);
+}
+
+/**
+ * Write down what is worth keeping from turns that are about to be forgotten.
+ *
+ * The trigger is the same moment as the summary's, and for the same reason
+ * turned up one notch: the point at which a turn falls out of the context
+ * window is the last moment anything in it can still be saved. The summary
+ * keeps it for this conversation; this keeps it for every conversation after.
+ *
+ * `memorisedThrough` records how far along the transcript that has been done,
+ * so each turn is harvested once rather than the whole fallen-off tail being
+ * re-read every few messages.
+ *
+ * The other trigger is somebody saying "remember that", which cannot wait for
+ * the window to slide — twenty messages later is not when they expect it to
+ * have happened. Those turns are still in the window and will come round again
+ * on the ordinary path; harvesting them twice is harmless, because a fact
+ * already known folds into the one already stored.
+ */
+async function updateMemory(conversation, settings) {
+  if (!providers.remembers(settings)) return;
+
+  const total = conversation.messages.length;
+  const lastSaid = [...conversation.messages].reverse().find((message) => message.role === 'user' && !message.kind);
+  const askedOutright = lastSaid && ASKED_TO_REMEMBER.test(String(lastSaid.content || ''));
+
+  // How far the ordinary harvest has got, clamped: the message list is trimmed
+  // at MAX_STORED_MESSAGES, which shifts every index under it.
+  const from = Math.min(Math.max(0, conversation.memorisedThrough || 0), total);
+  const fallenOff = Math.max(0, total - CONTEXT_MESSAGES);
+
+  let harvest;
+  let advanceTo = null;
+  if (fallenOff > from) {
+    harvest = conversation.messages.slice(from, fallenOff);
+    advanceTo = fallenOff;
+  } else if (askedOutright) {
+    harvest = conversation.messages.slice(-EXPLICIT_LOOKBACK);
+  } else {
+    return;
+  }
+
+  const transcript = transcribeFor(harvest);
+  if (!transcript.trim()) {
+    if (advanceTo !== null) conversation.memorisedThrough = advanceTo;
+    return;
+  }
+
+  const ask = [
+    {
+      role: 'system',
+      content:
+        'You note things worth remembering about the person you are talking to, for conversations ' +
+        'months from now. Write each as one short third-person sentence starting "They" or "Their". ' +
+        'Only durable facts: names, family, work, where they live, preferences, ongoing projects, and ' +
+        'anything they asked you to remember. Never a passing question, never what you said, never ' +
+        'anything about yourself. One per line, each starting with "- ". At most five. ' +
+        'If there is nothing worth keeping, write exactly: none',
+    },
+    { role: 'user', content: `Conversation:\n${transcript}` },
+  ];
+
+  const said = await runModel(settings, ask, { maxTokens: 200 });
+  const facts = parseExtraction(stripThinking(extractReply(said)));
+
+  if (advanceTo !== null) conversation.memorisedThrough = advanceTo;
+
+  if (facts.length) {
+    await memory.load();
+    const learned = memory.rememberAll(facts, { chatId: conversation.id, title: conversation.title }, {
+      max: settings.memory.max,
+    });
+    await memory.persist();
+    for (const { fact, updated } of learned) {
+      console.log(`[buddy] ${updated ? 'updated' : 'remembered'}: ${fact.text}`);
+    }
+  }
+
   if (settings.saveHistory) await history.persist(conversation);
 }
 
@@ -1222,13 +1334,40 @@ async function handleChat(req, res) {
    */
   const actionResult = body.actionResult && typeof body.actionResult === 'object' ? body.actionResult : null;
 
-  if (!incoming.length && !actionResult) {
+  /**
+   * "Answer that again."
+   *
+   * The turn is not repeated, it is *replaced*: the assistant's last reply is
+   * taken off the end of the conversation and the same question is put back to
+   * the model. Appending the question a second time instead would leave the
+   * transcript reading as though the user asked twice and would feed the
+   * rejected answer back in as context for its own replacement — which is how
+   * a retry ends up producing a paraphrase of the thing being retried.
+   */
+  const retry = body.retry === true;
+
+  if (!incoming.length && !actionResult && !retry) {
     return sendJson(res, 400, { error: 'messages must be a non-empty array' });
   }
 
   const settings = readSettings();
   await history.load();
   const conversation = history.resolve(body.sessionId);
+
+  if (retry) {
+    // Anything an action put there goes too, or the model is handed the result
+    // of a call it is no longer making.
+    while (
+      conversation.messages.length &&
+      (conversation.messages[conversation.messages.length - 1].role === 'assistant' ||
+        conversation.messages[conversation.messages.length - 1].kind === 'action')
+    ) {
+      conversation.messages.pop();
+    }
+    if (!conversation.messages.length) {
+      return sendJson(res, 400, { error: 'there is nothing to answer again' });
+    }
+  }
 
   let added = 0;
   let sentImages = 0;
@@ -1253,7 +1392,11 @@ async function handleChat(req, res) {
   // Every message was blank. This is what a transcription of silence looks like
   // by the time it reaches here, and it is a bad request rather than a failure
   // of the model — which would otherwise throw with nothing to reply to.
-  if (!added) {
+  //
+  // A retry adds nothing on purpose: the question it is answering again is
+  // already the last thing in the conversation, which is exactly why it must
+  // not be appended a second time.
+  if (!added && !retry) {
     return sendJson(res, 400, { error: 'There was nothing to reply to.', empty: true });
   }
 
@@ -1299,13 +1442,30 @@ async function handleChat(req, res) {
   const name = settings.identity.name;
   const basePrompt = spoken ? systemPromptVoice(name) : systemPrompt(name);
 
+  // Only hand over the action instructions when the last thing said looks like a
+  // request to do something — see looksLikeRequest for why carrying them on every
+  // turn makes a small model markedly worse at ordinary conversation.
+  const lastSaid = [...conversation.messages].reverse().find((message) => message.role === 'user');
+
   /**
-   * The two things that stop a conversation starting from nothing.
+   * The three things that stop a conversation starting from nothing.
    *
    * `about` is what the user wrote about themselves and rides on every request
    * in every chat. The summary is this conversation's own past — the turns that
    * have fallen out of the window above — so a long exchange stops quietly
-   * forgetting how it began while still only sending twenty messages.
+   * forgetting how it began while still only sending twenty messages. And the
+   * recalled facts are what Buddy has worked out across *other* conversations,
+   * which is the only one of the three that survives starting a new chat.
+   *
+   * The order is deliberate. What somebody wrote about themselves outranks what
+   * Buddy inferred about them, and a small model weights the top of a prompt far
+   * more reliably than the middle, so the hand-written note goes first and the
+   * guesses go last.
+   *
+   * Only the facts worth recalling for *this* message are sent, never the whole
+   * store — see memory.recall. An irrelevant fact is worse than a missing one:
+   * it invites the model to drag somebody's job title into a question about the
+   * weather.
    */
   const remembered = [];
   const about = String(settings.about || '').trim();
@@ -1313,11 +1473,16 @@ async function handleChat(req, res) {
   if (conversation.summary) {
     remembered.push(`Earlier in this conversation:\n${conversation.summary}`);
   }
-
-  // Only hand over the action instructions when the last thing said looks like a
-  // request to do something — see looksLikeRequest for why carrying them on every
-  // turn makes a small model markedly worse at ordinary conversation.
-  const lastSaid = [...conversation.messages].reverse().find((message) => message.role === 'user');
+  if (providers.remembers(settings) && lastSaid) {
+    await memory.load();
+    const recalled = memory.recall(lastSaid.content);
+    if (recalled.length) {
+      remembered.push(
+        'Things you remember about them from earlier conversations:\n' +
+          recalled.map((fact) => `- ${fact.text}`).join('\n')
+      );
+    }
+  }
   const roots = filesStore.scopedRoots(settings);
   const permissions = {
     allowSystem: settings.allowSystem,
@@ -1580,14 +1745,28 @@ async function handleChat(req, res) {
   };
 
   /**
-   * Fold the fallen-off turns into the conversation's notes — after the answer
-   * has gone, never before it. This costs a second generation, and the user
-   * should not wait through it for a reply that is already written.
+   * Fold the fallen-off turns into the conversation's notes, and into what
+   * Buddy knows about the person across conversations — after the answer has
+   * gone, never before it. Each costs a generation, and the user should not
+   * wait through either for a reply that is already written.
+   *
+   * One after the other rather than together: there is a single model loaded in
+   * this process, and asking it two things at once would have them queue behind
+   * each other anyway, having first taken the CPU away from anything the user
+   * does next.
    */
-  const remember = () =>
-    updateSummary(conversation, settings).catch((error) =>
-      console.warn('[buddy] could not update the conversation summary:', error.message)
-    );
+  const remember = async () => {
+    try {
+      await updateSummary(conversation, settings);
+    } catch (error) {
+      console.warn('[buddy] could not update the conversation summary:', error.message);
+    }
+    try {
+      await updateMemory(conversation, settings);
+    } catch (error) {
+      console.warn('[buddy] could not update what is remembered:', error.message);
+    }
+  };
 
   if (wantsStream) {
     // The reply is sent in full rather than as a last delta. Streaming shows a
@@ -1854,6 +2033,73 @@ async function handleClearChats(_req, res) {
   return sendJson(res, 200, { ok: true, deleted: count });
 }
 
+// ── what Buddy remembers ──────────────────────────────────────────────────
+//
+// Everything here exists so that the memory can be looked at and argued with.
+// A store the user cannot inspect would be the thing the `about` note was
+// deliberately not, so these routes are not an extra: they are the reason the
+// feature is allowed to exist at all.
+
+async function handleListMemory(_req, res) {
+  await memory.load();
+  const settings = readSettings();
+  return sendJson(res, 200, {
+    facts: memory.all(),
+    // Three values rather than one, because the pane has to be able to show a
+    // switch that is on while nothing is being remembered, and say why. `wanted`
+    // is where the user left the switch; `enabled` is what is actually
+    // happening; `saveHistory` is the reason they differ, when they do.
+    enabled: providers.remembers(settings),
+    wanted: settings.memory.enabled,
+    saveHistory: settings.saveHistory,
+    max: settings.memory.max,
+  });
+}
+
+async function handleAddMemory(req, res) {
+  const body = await readBody(req);
+  if (typeof body.text !== 'string' || !body.text.trim()) {
+    return sendJson(res, 400, { error: 'text is required' });
+  }
+  await memory.load();
+  const settings = readSettings();
+  // Written by hand, so there is no conversation it came out of — and it is
+  // pinned, because somebody who types a fact in means it to stick rather than
+  // to be aged out later by a scoring rule they never saw.
+  const result = memory.remember(body.text, null, { max: settings.memory.max });
+  if (!result.ok) return sendJson(res, 400, { error: 'that is not something Buddy can remember' });
+  if (body.pinned !== false) result.fact.pinned = true;
+  await memory.persist();
+  return sendJson(res, 200, { ok: true, fact: result.fact, updated: result.updated });
+}
+
+async function handleEditMemory(req, res, [id]) {
+  const body = await readBody(req);
+  await memory.load();
+  const fact = memory.edit(id, {
+    ...(typeof body.text === 'string' ? { text: body.text } : {}),
+    ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
+  });
+  if (!fact) return sendJson(res, 404, { error: 'No such memory' });
+  await memory.persist();
+  return sendJson(res, 200, { ok: true, fact });
+}
+
+async function handleForgetMemory(_req, res, [id]) {
+  await memory.load();
+  if (!memory.forget(id)) return sendJson(res, 404, { error: 'No such memory' });
+  await memory.persist();
+  return sendJson(res, 200, { ok: true });
+}
+
+async function handleClearMemory(_req, res) {
+  await memory.load();
+  const count = memory.clear();
+  await memory.persist();
+  console.log(`[buddy] forgot ${count} remembered fact(s)`);
+  return sendJson(res, 200, { ok: true, deleted: count });
+}
+
 // ── routing ───────────────────────────────────────────────────────────────
 
 const UUID = '([0-9a-fA-F-]{36})';
@@ -1888,6 +2134,11 @@ const ROUTES = [
   ['GET', new RegExp(`^/chats/${UUID}$`), handleGetChat],
   ['PATCH', new RegExp(`^/chats/${UUID}$`), handleRenameChat],
   ['DELETE', new RegExp(`^/chats/${UUID}$`), handleDeleteChat],
+  ['GET', /^\/memory$/, handleListMemory],
+  ['POST', /^\/memory$/, handleAddMemory],
+  ['DELETE', /^\/memory$/, handleClearMemory],
+  ['PATCH', new RegExp(`^/memory/${UUID}$`), handleEditMemory],
+  ['DELETE', new RegExp(`^/memory/${UUID}$`), handleForgetMemory],
 ];
 
 function matchRoute(method, pathname) {
@@ -2067,6 +2318,9 @@ module.exports = {
   start,
   readConfig,
   readSettings,
+  // The main process performs set_name, and this is the only path that writes
+  // settings — going round it would skip normalisation and the cache.
+  writeSettings,
   isConfigured,
   activeModelId,
   configPath,

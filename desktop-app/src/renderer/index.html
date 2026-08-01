@@ -106,25 +106,37 @@
                   </svg>
                   <span>Brain</span>
                 </button>
-                <button class="rail-tab" type="button" role="tab" data-pane="voice" aria-selected="false">
+                <!--
+                  Speaking and listening are one tab, not two. Split, they made
+                  you know which half of a conversation was broken before you
+                  could go and look at it — and "my audio is wrong" does not come
+                  with that answer attached.
+                -->
+                <button class="rail-tab" type="button" role="tab" data-pane="speech" aria-selected="false">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M4 10v4h3l4 3V7L7 10H4z" />
                     <path d="M15.5 9.2a3.6 3.6 0 0 1 0 5.6" />
+                    <path d="M18.5 6.8a7.5 7.5 0 0 1 0 10.4" />
                   </svg>
-                  <span>Voice</span>
-                </button>
-                <button class="rail-tab" type="button" role="tab" data-pane="hearing" aria-selected="false">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <rect x="9" y="3" width="6" height="11" rx="3" />
-                    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-                  </svg>
-                  <span>Hearing</span>
+                  <span>Speech</span>
                 </button>
                 <button class="rail-tab" type="button" role="tab" data-pane="doing" aria-selected="false">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
                   </svg>
                   <span>Doing</span>
+                </button>
+                <!--
+                  Everything Buddy keeps about you, in one place: the chats, the
+                  note you write, and the facts it works out. They were three
+                  tabs, one of them filed under appearance, and the switch that
+                  governs the third lived in the first.
+                -->
+                <button class="rail-tab" type="button" role="tab" data-pane="memory" aria-selected="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 4h10a2 2 0 0 1 2 2v14l-7-3.5L5 20V6a2 2 0 0 1 2-2z" />
+                  </svg>
+                  <span>Memory</span>
                 </button>
                 <button class="rail-tab" type="button" role="tab" data-pane="look" aria-selected="false">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -134,12 +146,6 @@
                     <circle cx="9.5" cy="15" r="1.4" />
                   </svg>
                   <span>Look</span>
-                </button>
-                <button class="rail-tab" type="button" role="tab" data-pane="chats" aria-selected="false">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M20 15a3 3 0 0 1-3 3H8l-4 3V6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3z" />
-                  </svg>
-                  <span>Chats</span>
                 </button>
                 <button class="rail-tab" type="button" role="tab" data-pane="about" aria-selected="false">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -153,7 +159,7 @@
               <div class="panes" id="settings-panes">
                 <!-- ── brain: which model answers ─────────────────── -->
                 <section class="pane is-on" data-pane="brain" role="tabpanel">
-                  <h2>Where Buddy thinks</h2>
+                  <h2 data-name-template="Where {name} thinks">Where Buddy thinks</h2>
                   <!--
                     This pair is the way back as much as the way out. Switching
                     to the cloud used to be a one-way door: the built-in model
@@ -236,8 +242,11 @@
                 </section>
 
                 <!-- ── voice ──────────────────────────────────────── -->
-                <section class="pane" data-pane="voice" role="tabpanel">
-                  <h2>How Buddy sounds</h2>
+                <!-- ── speech: both halves of talking to Buddy ────── -->
+                <section class="pane" data-pane="speech" role="tabpanel">
+                  <h2>Talking and listening</h2>
+
+                  <h3 data-name-template="How {name} sounds">How Buddy sounds</h3>
 
                   <!-- Lived in the panel header as an unlabelled speaker icon,
                        which is not where anyone would look for it. -->
@@ -254,7 +263,7 @@
 
                   <div class="asset" id="voice-asset" hidden>
                     <div class="asset-text">
-                      <strong id="voice-asset-title">Buddy's own voice isn't downloaded yet</strong>
+                      <strong id="voice-asset-title" data-name-template="{name}’s own voice isn’t downloaded yet">Buddy’s own voice isn’t downloaded yet</strong>
                       <span id="voice-asset-sub">A one-time 156 MB download. After it, speaking never needs the internet.</span>
                     </div>
                     <div class="bar" aria-hidden="true"><span class="bar-fill" id="voice-bar"></span></div>
@@ -292,14 +301,12 @@
                     <button class="btn" id="voice-preview" type="button">Hear it</button>
                     <span class="row-note" id="voice-preview-note"></span>
                   </div>
-                </section>
 
-                <!-- ── hearing / wake word ────────────────────────── -->
-                <section class="pane" data-pane="hearing" role="tabpanel">
-                  <h2>Listening for you</h2>
+                  <!-- ── the other half: hearing / wake word ──────── -->
+                  <h3 class="section-break">Listening for you</h3>
                   <div class="asset" id="hearing-asset" hidden>
                     <div class="asset-text">
-                      <strong id="hearing-asset-title">Buddy's ears aren't downloaded yet</strong>
+                      <strong id="hearing-asset-title" data-name-template="{name}’s ears aren’t downloaded yet">Buddy’s ears aren’t downloaded yet</strong>
                       <span id="hearing-asset-sub">A one-time 39 MB download. After it, listening never needs the internet.</span>
                     </div>
                     <div class="bar" aria-hidden="true"><span class="bar-fill" id="hearing-bar"></span></div>
@@ -350,10 +357,23 @@
                   </div>
 
                   <!--
+                    Deliberately here rather than under Look, and deliberately
+                    below the wake-word test. This is where somebody is standing
+                    when the wake word has just failed them, and these are the
+                    two ways in that do not depend on a microphone, a room, a
+                    Bluetooth link or a transcriber.
+                  -->
+                  <h3 class="section-break">When speaking to it will not do</h3>
+                  <p class="pane-lede">
+                    These work anywhere, even over a full-screen window, and never depend on being heard.
+                  </p>
+                  <div class="keys" id="shortcut-list"></div>
+
+                  <!--
                     What the orb has actually heard. Without this, a wake word
                     that never fires gives you nothing to go on at all.
                   -->
-                  <h3>What Buddy heard recently</h3>
+                  <h3 id="heard-title" data-name-template="What {name} heard recently">What Buddy heard recently</h3>
                   <div class="heard-list" id="heard-list"></div>
 
                   <div class="probe-list" id="wake-probe" hidden>
@@ -373,7 +393,7 @@
 
                 <!-- ── what Buddy is allowed to do ────────────────── -->
                 <section class="pane" data-pane="doing" role="tabpanel">
-                  <h2>What Buddy may do</h2>
+                  <h2 data-name-template="What {name} may do">What Buddy may do</h2>
                   <p class="pane-lede">
                     Everything here is off until you turn it on, and every action is written into the chat
                     as it happens — nothing is done quietly.
@@ -387,7 +407,7 @@
                   <label class="switch big">
                     <input type="checkbox" id="allow-system" />
                     <span>
-                      <strong>Let Buddy into your system</strong>
+                      <strong id="allow-system-label" data-name-template="Let {name} into your system">Let Buddy into your system</strong>
                       <small>
                         Open web pages and searches, look at your screen, and read, write and delete files.
                         The old version of anything it overwrites is kept alongside it as a .bak file,
@@ -429,6 +449,87 @@
                   </div>
                 </section>
 
+
+                <!-- ── memory: everything Buddy keeps about you ──── -->
+                <!--
+                  Three things that were three tabs. They belong together
+                  because they are one question — what does Buddy hold on to? —
+                  and because they are wired together: remembering rides on
+                  saving, so the switch that governs the bottom of this pane
+                  used to live in a different tab entirely.
+
+                  Ordered by that dependency, top to bottom: what is kept, what
+                  you tell it, what it works out for itself.
+                -->
+                <section class="pane" data-pane="memory" role="tabpanel">
+                  <h2 data-name-template="What {name} keeps">What Buddy keeps</h2>
+
+                  <h3>Your conversations</h3>
+                  <label class="switch big">
+                    <input type="checkbox" id="save-history" />
+                    <span>
+                      <strong>Keep chats on this device</strong>
+                      <small id="save-history-note">Stored as a plain file in Buddy's own folder. Nothing is uploaded.</small>
+                    </span>
+                  </label>
+                  <p class="pane-lede" id="chat-count"></p>
+                  <button class="danger" id="clear-history" type="button">Delete all saved chats</button>
+
+                  <!--
+                    The note you write. It sat under Look, next to the orb-size
+                    slider, which is not where anybody would go looking for it.
+                  -->
+                  <h3 class="section-break">What you have told it about you</h3>
+                  <p class="pane-lede">
+                    Carried into every conversation, so you are not a stranger in each new one. Your name,
+                    what you do, how you like to be answered — whatever is worth not repeating. Buddy never
+                    writes this itself; it is only ever what you put here.
+                  </p>
+                  <textarea
+                    id="about-you"
+                    rows="4"
+                    maxlength="600"
+                    placeholder="e.g. I'm Jeff. I write software, mostly JavaScript. Keep answers short and skip the preamble."
+                    spellcheck="true"
+                  ></textarea>
+                  <p class="row-note" id="about-you-note"></p>
+
+                  <!--
+                    The list is the point of this section, not a detail of it.
+                    Buddy keeping notes on somebody is only defensible if they
+                    can read every one, correct it, or throw it away, so nothing
+                    is behind a disclosure and the facts are shown in full.
+                  -->
+                  <h3 class="section-break">What it has worked out for itself</h3>
+                  <label class="switch big">
+                    <input type="checkbox" id="memory-enabled" />
+                    <span>
+                      <strong>Remember things across conversations</strong>
+                      <small id="memory-switch-note"
+                        >Buddy notes what seems worth keeping and uses it in later chats. Everything it
+                        remembers is listed below.</small
+                      >
+                    </span>
+                  </label>
+
+                  <form class="memory-add" id="memory-add">
+                    <input
+                      class="memory-add-input"
+                      id="memory-add-text"
+                      type="text"
+                      autocomplete="off"
+                      maxlength="200"
+                      placeholder="Tell Buddy something to remember…"
+                      aria-label="Something for Buddy to remember"
+                    />
+                    <button class="btn" id="memory-add-go" type="submit">Remember</button>
+                  </form>
+
+                  <p class="pane-lede" id="memory-count"></p>
+                  <div class="memory-list" id="memory-list"></div>
+                  <button class="danger" id="memory-clear" type="button">Forget everything</button>
+                </section>
+
                 <!-- ── name, colour, theme, size ──────────────────── -->
                 <section class="pane" data-pane="look" role="tabpanel">
                   <h2>Name and appearance</h2>
@@ -462,21 +563,6 @@
                   -->
                   <p class="pane-lede" id="wake-word-note"></p>
 
-                  <h3>What it knows about you</h3>
-                  <p class="pane-lede">
-                    Carried into every conversation, so you are not a stranger in each new one. Your name,
-                    what you do, how you like to be answered — whatever is worth not repeating. Buddy never
-                    writes this itself; it is only ever what you put here.
-                  </p>
-                  <textarea
-                    id="about-you"
-                    rows="4"
-                    maxlength="600"
-                    placeholder="e.g. I'm Jeff. I write software, mostly JavaScript. Keep answers short and skip the preamble."
-                    spellcheck="true"
-                  ></textarea>
-                  <p class="row-note" id="about-you-note"></p>
-
                   <h3>Colour</h3>
                   <p class="pane-lede">
                     The orb, its glow, and everything highlighted in the app are mixed from this one colour.
@@ -502,26 +588,12 @@
                   <div class="runs" id="orb-sizes"></div>
                 </section>
 
-                <!-- ── chats / privacy ────────────────────────────── -->
-                <section class="pane" data-pane="chats" role="tabpanel">
-                  <h2>Your conversations</h2>
-                  <label class="switch big">
-                    <input type="checkbox" id="save-history" />
-                    <span>
-                      <strong>Keep chats on this device</strong>
-                      <small>Stored as a plain file in Buddy's own folder. Nothing is uploaded.</small>
-                    </span>
-                  </label>
-                  <p class="pane-lede" id="chat-count"></p>
-                  <button class="danger" id="clear-history" type="button">Delete all saved chats</button>
-                </section>
-
                 <!-- ── about ──────────────────────────────────────── -->
                 <section class="pane" data-pane="about" role="tabpanel">
-                  <h2>About Buddy</h2>
+                  <h2 data-name-template="About {name}">About Buddy</h2>
                   <p class="pane-lede" id="about-version"></p>
                   <div class="facts" id="about-facts"></div>
-                  <button class="btn" id="open-folder" type="button">Show Buddy's folder</button>
+                  <button class="btn" id="open-folder" type="button" data-name-template="Show {name}’s folder">Show Buddy’s folder</button>
                 </section>
               </div>
             </div>

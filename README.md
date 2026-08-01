@@ -45,6 +45,7 @@ or type leaves it:
 | **Talking** | Kokoro-82M, in-process via onnxruntime | your OS's voices · a cloud API | **no** |
 | **Hearing** | Whisper tiny.en, in-process | your own Whisper server · a cloud API · off | **no** |
 | **Your chat history** | plain JSON on your disk | — | **never** |
+| **What it remembers about you** | plain JSON on your disk | — | only with a cloud **brain**, which is sent the few facts relevant to each message |
 
 The one exception is the **downloads on first launch**, all from HuggingFace: ~2.3 GB for the model,
 then ~156 MB for the voice and ~39 MB for the ears. Only the model is waited for — Buddy opens as
@@ -69,6 +70,11 @@ answers, because the whole sentence was already transcribed.
 Spoken answers are deliberately short: a sentence or two of plain speech, no lists and no markdown.
 Every extra sentence is another second of synthesis before you hear anything and several more you
 have to sit through.
+
+**Buddy starts talking before it has finished thinking.** The reply is fed to the voice a sentence
+at a time as the model writes it, so the opening line is usually already being spoken while the rest
+is still being generated, rather than the two happening one after the other. Against a reply that
+takes 1.6 seconds to generate, that moves the first sound from about 2.2 seconds to about 0.8.
 
 **What you say out loud goes into the same conversation as what you type.** The orb and the panel
 share one thread, so you can ask something across the room, open the panel later, and scroll back
@@ -97,7 +103,7 @@ Two details worth knowing. Clips include the **third of a second before** speech
 in a rolling buffer — without it the leading “Hey” is already gone by the time the detector fires.
 And Buddy ignores its own voice while it is speaking, so it cannot wake itself up.
 
-You can switch the wake word off from the tray menu or from **Settings → Hearing** at any time. If
+You can switch the wake word off from the tray menu or from **Settings → Speech** at any time. If
 your machine has no microphone, Buddy notices, turns the wake word off, and says so on the orb rather
 than failing quietly.
 
@@ -120,6 +126,7 @@ and not a sign that anything is wrong.
 | OS | What you'll see | What to do |
 | --- | --- | --- |
 | **macOS** | “Buddy can't be opened because it is from an unidentified developer” — or “Buddy is damaged” | Right-click the app → **Open** (don't double-click). If it claims the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Buddy.app` |
+| **macOS**, again | A prompt asking for the microphone | Allow it, or the wake word cannot work. macOS gates the microphone itself, separately from the app — if you decline, it is re-enabled under *System Settings → Privacy & Security → Microphone*, not in Buddy. |
 | **Windows** | SmartScreen: “Windows protected your PC” | **More info** → **Run anyway** |
 | **Linux** | Nothing happens when you click the AppImage | `chmod +x Buddy-*.AppImage` then run it |
 
@@ -130,14 +137,15 @@ certificate; both cost money and neither is set up here.
 
 ## Settings
 
-Click **Buddy's own name and orb** in the top-left of the panel. Five sections down the side:
+Click **Buddy's own name and orb** in the top-left of the panel. Six sections down the side:
 
 | Section | What is in it |
 | --- | --- |
 | **Brain** | Every model Buddy can download itself, with sizes and what each is good for. One tap to switch, one to delete a model you are done with. Any models a running Ollama has pulled appear here too. |
-| **Voice** | Which engine speaks, which of Kokoro's 28 voices, how fast, and a **Hear it** button to audition before committing. |
-| **Hearing** | The “Hey Buddy” switch, which transcriber to use, whether Buddy may open things, and **Test “Hey Buddy”** — it walks the whole chain and marks the step that failed. |
-| **Chats** | Whether conversations are kept, how many there are, and delete-everything. |
+| **Speech** | Both halves of talking to Buddy. Which engine speaks, which of Kokoro's 28 voices, how fast, and a **Hear it** button; then the “Hey Buddy” switch, which transcriber to use, and **Test “Hey Buddy”** — it walks the whole chain and marks the step that failed. |
+| **Doing** | Whether Buddy may open pages, run searches, and read, write or delete files — and inside which folders. Off by default. |
+| **Memory** | Everything Buddy keeps about you: whether chats are saved, the note you write about yourself, and every fact it has worked out — one sentence at a time, with where each came from. Reword any of them, pin the ones that always matter, delete the ones it got wrong. |
+| **Look** | Its name, what it answers to, the one colour everything is mixed from, the theme, and the orb's size. |
 | **About** | Which engine is doing each job and whether it is local, so the privacy claim is checkable rather than asserted. |
 
 Nothing here needs the file system; the sections below are for people who prefer a text editor.
@@ -159,13 +167,15 @@ listed [below](#where-things-are-stored). Restart Buddy after editing, or POST t
   "chat": { "provider": "builtin", "builtinModel": "", "model": "", "baseUrl": "http://127.0.0.1:11434" },
   "tts":  { "provider": "kokoro", "voice": "af_heart", "speed": 1 },
   "asr":  { "provider": "local", "baseUrl": "http://127.0.0.1:8000/v1", "model": "Systran/faster-whisper-small" },
-  "saveHistory": true
+  "saveHistory": true,
+  "memory": { "enabled": true, "max": 200 }
 }
 ```
 
 | Job | Setting | Values |
 | --- | --- | --- |
 | Doing things | `allowActions` | `false` (default) · `true` |
+| Remembering you | `memory.enabled` | `true` (default) · `false` — needs `saveHistory` too |
 | Thinking | `chat.provider` | `builtin` (default) · `ollama` · `z-ai` |
 | Which built-in | `chat.builtinModel` | `llama-3.2-1b-instruct-q4_k_m` (default) · `llama-3.2-3b-instruct-q4_k_m` · `qwen2.5-3b-instruct-q4_k_m` · `qwen2.5-7b-instruct-q4_k_m` |
 | Talking | `tts.provider` | `kokoro` (default) · `system` · `z-ai` |
@@ -300,13 +310,66 @@ Two things worth knowing:
 The files are **not encrypted**. Anyone with access to your user account can read them, the same as
 any other document in your home folder.
 
+## What Buddy remembers about you
+
+A chat remembers itself and nothing beyond itself, so Buddy used to meet you as a stranger every
+time you started a new one. It now keeps a short list of things it has worked out about you, and
+uses the ones relevant to what you just asked.
+
+The objection to doing that at all is a good one: **a note about yourself that you cannot see and
+did not write is worse than no note at all.** So the list is the feature, not a side effect of it.
+**Settings → Memory** shows every single thing Buddy believes about you, one plain sentence each,
+with the conversation it came out of and when:
+
+```
+They are allergic to peanuts.                      From "what to cook on Friday", 1 month ago
+Their sister is called Mara and lives in Hull.     From "planning the weekend", 3 days ago
+They are learning Portuguese.                      You told Buddy this, today
+```
+
+Click any of them to reword it. **Pin** one — the bookmark — and it is used in every conversation
+whether or not it looks relevant, which is where an allergy belongs. Delete one and it is gone.
+Type into the box at the top to tell Buddy something directly rather than waiting for it to notice.
+
+Two things worth knowing:
+
+- **Only the relevant few are ever sent.** Buddy holds up to two hundred facts but shows the model
+  at most six at a time, chosen against what you just said, plus anything pinned. An irrelevant fact
+  is worse than a missing one — it invites the model to drag your job into a question about the
+  weather.
+- **Remembering follows saving.** Turn off *Save new chats to this device* and Buddy stops noting
+  things down too; the Memory pane says so rather than quietly carrying on. Your switch is kept as
+  you left it, so turning saving back on resumes where you were.
+
+It is stored as `memory.json` next to your chats — one readable file, not encrypted, yours to delete.
+And note that **if your Brain is a cloud API, what Buddy remembers goes to that provider** along
+with the message it was relevant to; the About pane says so when that is the case.
+
+Facts are noticed as the conversation scrolls past what the model can see, and immediately when you
+say “remember that”. What Buddy does *not* yet do is notice that a fact has **changed** — tell it you
+have moved and it will hold both the old town and the new one until you delete one. That is
+deliberate for now: the alternative rule quietly overwrote "their daughter goes to Ashfield" with
+"their son goes to Ashfield", and a wrong memory is worse than an untidy one.
+
 ---
 
 ### Using Buddy
 
 - **Click the orb** to open the panel, or **drag it** anywhere; it remembers where you left it.
-  Click the tray/menu-bar icon to toggle the panel.
+  Click the tray/menu-bar icon to toggle the panel. **Clicking it while Buddy is talking stops it.**
 - **Say “Hey Buddy”** to open it hands-free. Ask in the same breath to skip the greeting.
+- **Two keys work from anywhere**, over a full-screen window, without needing to be heard:
+
+  | | Windows · Linux | macOS |
+  | --- | --- | --- |
+  | Open Buddy, ready to type | `Ctrl`+`Shift`+`Space` | `⌘`+`⇧`+`Space` |
+  | Stop talking | `Ctrl`+`Shift`+`.` | `⌘`+`⌃`+`.` |
+
+  macOS gets a different second one because `⌘`+`⇧`+`.` is Finder's show-hidden-files, and a global
+  shortcut is taken from every other program on the machine. Both are listed in the tray menu and
+  under **Settings → Speech** so you do not have to remember them. On Linux under **Wayland** they
+  will not register at all — the compositor owns global shortcuts and no application can claim them;
+  the tray and the orb still work, and the log says so rather than blaming another program.
 - **Click Buddy's name** in the top-left for settings.
 - **Type** and press Enter, or **tap the mic** to record a voice message (tap again to send it).
 - **☰ opens your saved chats**; **+ starts a new one**. Escape closes whatever is over the chat.
@@ -398,6 +461,15 @@ curl -s -X POST -H "X-Buddy-Token: $TOKEN" -H 'Content-Type: application/json' \
 # The 28 voices Buddy can speak with:
 curl -s -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/voices
 
+# Everything Buddy has worked out about you, and how to argue with it:
+curl -s -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/memory
+curl -s -X POST -H "X-Buddy-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"text":"They are allergic to peanuts."}' http://127.0.0.1:$PORT/memory
+curl -s -X PATCH -H "X-Buddy-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"pinned":true}' http://127.0.0.1:$PORT/memory/<id>
+curl -s -X DELETE -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/memory/<id>
+curl -s -X DELETE -H "X-Buddy-Token: $TOKEN" http://127.0.0.1:$PORT/memory   # all of it
+
 # How a reply gets split for speaking, one chunk at a time:
 curl -s -X POST http://127.0.0.1:$PORT/tts/plan \
   -H 'Content-Type: application/json' -H "X-Buddy-Token: $TOKEN" \
@@ -424,6 +496,8 @@ a packaged build:
 - `models/*.gguf` — the built-in language models (0.6–11 GB each). Delete to reclaim the space.
 - `models/hf/` — the voice (~156 MB) and the ears (~39 MB), as ONNX weights.
 - `chats/<id>.json` — one file per conversation. Yours to read, back up or delete.
+- `memory.json` — the short list of things Buddy has worked out about you, in plain sentences. One
+  file rather than one per fact, because the whole of it is read on every message.
 - `.z-ai-config` — your `baseUrl` and `apiKey`, written with `0600` where the filesystem supports it.
   **Stored unencrypted.** It's gitignored, and never logged or returned by any endpoint. Only exists
   if you use a cloud capability.
@@ -443,13 +517,13 @@ a packaged build:
 │  in-process HTTP server → 127.0.0.1:<OS-assigned port>     │
 │    /health /settings /providers/status /setup              │
 │    /model /models /speech /voices                          │
-│    /chat /tts /tts/plan /asr /chats                        │
+│    /chat /tts /tts/plan /asr /chats /memory                │
 └──────┬──────────────────────┬──────────────────────────────┘
        │                      │
        │ chats/*.json         ├── builtin  → llama.cpp, in this process   ← default
-       ▼ (never uploaded)     ├── kokoro   → onnxruntime, in this process ← default
-   your disk                  ├── local    → Whisper, in this process     ← default
-                              ├── system voice → the renderer, via the OS
+       │ memory.json          ├── kokoro   → onnxruntime, in this process ← default
+       ▼ (never uploaded)     ├── local    → Whisper, in this process     ← default
+   your disk                  ├── system voice → the renderer, via the OS
                               ├── ollama   → 127.0.0.1:11434
                               ├── whisper  → 127.0.0.1:8000
                               └── z-ai     → the provider's API

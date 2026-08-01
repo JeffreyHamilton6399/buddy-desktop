@@ -103,6 +103,21 @@ const DEFAULTS = {
    * have than no note at all.
    */
   about: '',
+  /**
+   * What Buddy works out about you on its own, across conversations.
+   *
+   * `about` above is the note you write; this is the one Buddy keeps. The
+   * objection to it has always been that a note about yourself you cannot see
+   * and did not write is worse than no note at all — which is an argument about
+   * visibility rather than about memory, so what answers it is the Memory pane,
+   * where every remembered fact can be read, edited, pinned or deleted one at a
+   * time. See memory.js.
+   *
+   * `max` is a guard against unattended extraction growing without bound, not a
+   * budget anybody should have to think about; two hundred short sentences is
+   * far more than a year of ordinary use produces.
+   */
+  memory: { enabled: true, max: 200 },
   saveHistory: true,
   /**
    * Whether typed replies are read out loud in the panel. A real setting rather
@@ -294,6 +309,15 @@ function normaliseSettings(raw) {
       wakeWord: normaliseWakeWord(identity.wakeWord, DEFAULTS.identity.wakeWord),
     },
     saveHistory: input.saveHistory !== false,
+    /**
+     * What the user asked for, which is not always what happens — see
+     * `remembers` for the coupling to saveHistory, and for why it is applied
+     * when the setting is read rather than when it is written.
+     */
+    memory: {
+      enabled: input.memory ? input.memory.enabled !== false : DEFAULTS.memory.enabled,
+      max: number(input.memory && input.memory.max, DEFAULTS.memory.max, 10, 2000),
+    },
     speakReplies: input.speakReplies !== false,
     // Capped because it rides on every single request: a page of prose here
     // would cost tokens on every turn of every conversation forever.
@@ -303,6 +327,26 @@ function normaliseSettings(raw) {
     fileRoots: files.normaliseRoots(input.fileRoots),
     fileScope: pick(input.fileScope, FILE_SCOPES, DEFAULTS.fileScope),
   };
+}
+
+/**
+ * Is Buddy actually remembering things about the user right now?
+ *
+ * Remembering follows saving and cannot happen without it. Somebody who turned
+ * off *Save new chats to this device* and later found Buddy had been keeping
+ * notes on them anyway would be right to feel misled: from outside, the two
+ * settings read as one promise, and this is the only interpretation that keeps
+ * it.
+ *
+ * The coupling is applied here, at every read, and deliberately not written
+ * into the settings file. Folding it in at save time looked simpler and was
+ * wrong — turning history off would overwrite the memory switch with `false`,
+ * and turning history back on would leave it off, because by then the answer
+ * the user originally gave had been destroyed. A preference somebody set is
+ * theirs to change; nothing should quietly forget it on their behalf.
+ */
+function remembers(settings) {
+  return settings.saveHistory !== false && settings.memory.enabled !== false;
 }
 
 /** True when a capability is answered by somebody else's server. */
@@ -580,6 +624,7 @@ module.exports = {
   OLLAMA_DEFAULT_MODEL,
   migrateSettings,
   normaliseSettings,
+  remembers,
   isFullyLocal,
   cloudCapabilities,
   ollamaChat,

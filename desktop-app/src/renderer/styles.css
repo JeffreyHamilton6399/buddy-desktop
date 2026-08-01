@@ -1518,6 +1518,274 @@ body.flat .panel {
   font-weight: 600;
 }
 
+/*
+ * A rule above a heading, for panes that carry more than one subject since the
+ * rail was cut from eight tabs to six. Without it "Listening for you" reads as
+ * another setting under Speaking rather than as the start of the other half.
+ */
+.pane h3.section-break {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--edge);
+}
+
+/* ── the shortcuts, written out ──────────────────────────────────────────── */
+
+.keys {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.key-combo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.key-combo kbd {
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--edge);
+  border-bottom-width: 2px;
+  background: rgba(var(--raise-rgb), 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.key-what {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* ── copy and retry, on hover over an answer ─────────────────────────────── */
+
+/*
+ * `.msg` is a flex row, so these trail the bubble rather than sitting under it,
+ * pinned to its bottom edge. Under it would need a wrapper element around the
+ * bubble, and a whole extra box in every message to hold two icons that are
+ * invisible most of the time is not worth it.
+ */
+.msg-acts {
+  display: flex;
+  align-self: flex-end;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin-bottom: 1px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+/* Kept while a button inside has focus, so this is reachable from the keyboard. */
+.msg:hover .msg-acts,
+.msg-acts:focus-within {
+  opacity: 1;
+}
+
+.msg-act {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: none;
+  background: none;
+  color: var(--dim-2);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.msg-act:hover {
+  background: rgba(var(--raise-rgb), 0.12);
+  color: inherit;
+}
+
+.msg-act.done {
+  color: var(--tone-amber);
+}
+
+.msg-act.failed {
+  color: var(--tone-rose);
+}
+
+.msg-act svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── what Buddy remembers ────────────────────────────────────────────────── */
+
+/*
+ * Left on, but not doing anything — chats are not being saved, and remembering
+ * rides on saving. The switch stays checked because that is still the answer the
+ * user gave, and stays clickable because they may want to change it before
+ * turning saving back on; it is only dimmed, so that "on" and "happening" do not
+ * look like the same thing.
+ */
+.switch.is-paused {
+  opacity: 0.62;
+}
+
+.memory-add {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.memory-add-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background: rgba(var(--raise-rgb), 0.04);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.memory-add-input:focus-visible {
+  outline: none;
+  border-color: rgba(var(--rose-rgb), 0.55);
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.memory-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 11px;
+  border: 1px solid var(--edge);
+  background: rgba(var(--raise-rgb), 0.03);
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.memory-row:hover {
+  background: rgba(var(--raise-rgb), 0.06);
+  border-color: rgba(var(--rose-rgb), 0.3);
+}
+
+.memory-row.is-pinned {
+  border-color: rgba(var(--amber-rgb), 0.45);
+  background: rgba(var(--amber-rgb), 0.07);
+}
+
+.memory-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/*
+ * The fact itself is the editable thing, and it is editable in place rather
+ * than behind a pencil button: correcting something Buddy has got wrong about
+ * you should be as quick as noticing it.
+ */
+.memory-text {
+  display: block;
+  width: 100%;
+  padding: 1px 3px;
+  margin: -1px -3px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.memory-text:hover {
+  border-color: var(--edge);
+}
+
+.memory-text:focus-visible {
+  outline: none;
+  border-color: rgba(var(--rose-rgb), 0.55);
+  background: rgba(var(--raise-rgb), 0.06);
+}
+
+.memory-source {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-row-act {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--dim-2);
+  opacity: 0;
+  transition: opacity 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+/* A pin stays visible once set — it is state, not an action waiting to happen. */
+.memory-row:hover .memory-row-act,
+.memory-row-act:focus-visible,
+.memory-row-act.is-on {
+  opacity: 1;
+}
+
+.memory-row-act.is-on {
+  color: var(--tone-amber);
+}
+
+.memory-row-act:hover {
+  background: rgba(var(--raise-rgb), 0.12);
+  color: inherit;
+}
+
+.memory-row-act.del:hover {
+  background: rgba(var(--rose-rgb), 0.2);
+  color: var(--tone-rose);
+}
+
+.memory-row-act svg {
+  width: 14px;
+  height: 14px;
+}
+
+.memory-empty {
+  padding: 20px 14px;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  border: 1px dashed var(--edge);
+  border-radius: 12px;
+}
+
 /* ── what Buddy heard ────────────────────────────────────────────────────── */
 
 .heard-list {
