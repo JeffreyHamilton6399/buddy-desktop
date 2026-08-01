@@ -91,10 +91,21 @@ function machineRoots() {
 function scopedRoots({ fileScope = 'folders', fileRoots = [], allowSystem = false } = {}) {
   const named = normaliseRoots(fileRoots);
   const write = named.length ? named : allowSystem ? normaliseRoots([os.homedir()]) : [];
-  return {
-    read: fileScope === 'everywhere' ? normaliseRoots(machineRoots()) : named.length ? named : write,
-    write,
-  };
+
+  /**
+   * Order matters as much as membership.
+   *
+   * A bare "notes.txt" is tried against each root in turn, so whichever comes
+   * first is what a plain filename means. Under the wide scope that used to be
+   * the drive roots, which made "read my notes" resolve to C:\notes.txt — not
+   * there, of course, while the file sat in the folder the user had actually
+   * shared. So the named folders go first and the drives follow: relative names
+   * land where somebody meant them, and a full path anywhere still resolves.
+   */
+  const read =
+    fileScope === 'everywhere' ? normaliseRoots([...named, ...machineRoots()]) : named.length ? named : write;
+
+  return { read, write };
 }
 
 /** Absolute, resolved, de-duplicated. Anything unusable is dropped. */

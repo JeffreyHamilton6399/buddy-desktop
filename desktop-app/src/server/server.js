@@ -422,6 +422,53 @@ function applyCors(req, res) {
  * caller falls back to waiting for the whole reply, which is what it did
  * before.
  */
+/**
+ * How much of an action's output the model is shown.
+ *
+ * A read of a file can be a megabyte, and the whole point of the context window
+ * is that it is not. Enough for a document worth discussing, and the model is
+ * told when it has been cut so it does not claim to have seen the end.
+ */
+const ACTION_RESULT_LIMIT = 4000;
+
+/**
+ * Turn what an action did into something a model can use.
+ *
+ * Written as prose rather than as a data structure, and addressed to the model
+ * in the second person, because this arrives as an ordinary user turn — that is
+ * the one shape every provider and every size of model already understands, and
+ * inventing a `tool` role would mean teaching it to llama.cpp, both cloud
+ * dialects and Ollama separately for no gain the user would ever see.
+ *
+ * The instruction at the end matters more than it looks. Without it a small
+ * model reads the result, decides the job is not finished, and emits the same
+ * marker again — which is a loop that reads the same file forever.
+ */
+function describeActionResult(result) {
+  const what = String(result.description || result.name || 'that').slice(0, 120);
+
+  if (result.ok === false) {
+    return (
+      `[Buddy tried to ${what} and it failed: ${String(result.error || 'unknown error').slice(0, 300)}]\n\n` +
+      'Tell the user plainly that it did not work and why. Do not try the same thing again.'
+    );
+  }
+
+  const detail = String(result.detail || '').trim();
+  if (!detail) {
+    return `[Buddy did ${what}, and it worked.]\n\nSay so briefly. Do not write another marker.`;
+  }
+
+  const clipped = detail.length > ACTION_RESULT_LIMIT;
+  const shown = clipped ? detail.slice(0, ACTION_RESULT_LIMIT) : detail;
+  return (
+    `[Result of ${what}:]\n\n${shown}\n\n` +
+    (clipped ? '[…truncated — this is only the beginning of it.]\n\n' : '') +
+    'That is the real result. Answer the user using it. Do not write another marker unless something ' +
+    'genuinely still needs doing.'
+  );
+}
+
 function streamableProvider(settings) {
   return settings.chat.provider === 'builtin' || settings.chat.provider === 'cloud';
 }
@@ -1056,8 +1103,18 @@ function normaliseImages(list) {
 
 async function handleChat(req, res) {
   const body = await readBody(req);
-  const incoming = Array.isArray(body.messages) ? body.messages : null;
-  if (!incoming || !incoming.length) {
+  const incoming = Array.isArray(body.messages) ? body.messages : [];
+  /**
+   * What came back from an action Buddy just performed.
+   *
+   * This is the second half of a turn rather than a new one: the model asked
+   * for something, the main process did it, and this is the answer coming back
+   * so the model can use it. So a request carrying one needs no user message —
+   * nobody has said anything new.
+   */
+  const actionResult = body.actionResult && typeof body.actionResult === 'object' ? body.actionResult : null;
+
+  if (!incoming.length && !actionResult) {
     return sendJson(res, 400, { error: 'messages must be a non-empty array' });
   }
 
@@ -1067,6 +1124,12 @@ async function handleChat(req, res) {
 
   let added = 0;
   let sentImages = 0;
+
+  if (actionResult) {
+    history.append(conversation, 'user', describeActionResult(actionResult), null, 'action');
+    added += 1;
+  }
+
   for (const message of incoming) {
     const images = normaliseImages(message && message.images);
     const text = message && typeof message.content === 'string' ? message.content : '';

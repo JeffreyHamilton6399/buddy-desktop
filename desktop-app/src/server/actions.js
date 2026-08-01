@@ -319,6 +319,16 @@ function instructionsFor({
     `You: Deleted it — it is in the ${BIN} if you want it back.\n` +
     '[[delete_file: bins.txt]]\n' +
     '\n' +
+    'When you read a file or list a folder, what it found is given back to you ' +
+    'in the next message, in square brackets. Do not guess at the contents ' +
+    'before then and do not claim to have read something you have not been ' +
+    'shown yet — write the marker, stop, and answer once you can see it.\n' +
+    '\n' +
+    'User: what is in my shopping list?\n' +
+    'You: Let me look.\n' +
+    '[[read_file: shopping.txt]]\n' +
+    '(the contents come back, and then you answer the question with them)\n' +
+    '\n' +
     'write_file replaces the whole file, so give the complete new contents, not ' +
     'just the change. The previous version is kept as a .bak file automatically. ' +
     `delete_file only ever deletes the one file named, and it goes to the ${BIN} ` +

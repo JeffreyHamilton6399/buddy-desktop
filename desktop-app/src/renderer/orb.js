@@ -567,20 +567,52 @@ export function initOrb() {
    * toast instead. A success needs no announcement — the page opening is the
    * announcement, and Buddy is already saying it out loud.
    */
+  /**
+   * Carry out whatever the reply asked for, and say what came of it.
+   *
+   * The result goes back to the model rather than only to a toast, because
+   * spoken questions are where that matters most: "what files do I have?" is
+   * only worth asking out loud if the answer is read out, and until this
+   * existed the listing went to a window nobody had open while Buddy said
+   * nothing useful.
+   *
+   * @returns {Promise<string>} a reply to speak, or '' when there is nothing more
+   */
   async function performAction(payload) {
     if (payload.actionRefused) {
       showToast(payload.actionRefused.slice(0, 60), true, 4000);
-      return;
+      return '';
     }
-    if (!payload.action) return;
+    if (!payload.action) return '';
 
+    let result;
     try {
-      const result = await window.buddy.runAction(payload.action);
-      if (!result || !result.ok) {
-        showToast(`Couldn't: ${(result && result.error) || 'unknown'}`.slice(0, 60), true, 4000);
-      }
+      result = await window.buddy.runAction(payload.action);
     } catch (error) {
       showToast(`Couldn't: ${error.message}`.slice(0, 60), true, 4000);
+      result = { ok: false, error: error.message };
+    }
+    if (!result || !result.ok) {
+      showToast(`Couldn't: ${(result && result.error) || 'unknown'}`.slice(0, 60), true, 4000);
+    }
+
+    try {
+      const followUp = await api('/chat', {
+        sessionId: activeChatId,
+        voice: true,
+        actionResult: {
+          ok: Boolean(result && result.ok),
+          detail: (result && result.detail) || '',
+          error: (result && result.error) || '',
+          name: payload.action.name,
+          description: payload.action.description,
+        },
+      });
+      window.buddy.notifyChatUpdated(activeChatId);
+      return String(followUp.reply || '').trim();
+    } catch (error) {
+      console.warn('[buddy] could not report the action result:', error.message);
+      return '';
     }
   }
 
@@ -628,8 +660,19 @@ export function initOrb() {
        * It runs before the sentence is spoken so the page is already on its way
        * up while Buddy is still saying so.
        */
-      performAction(payload);
+      // Started, not awaited: the page should already be opening while Buddy is
+      // still saying it is opening it.
+      const acting = performAction(payload);
       await speaker.speak(reply);
+
+      /**
+       * Then say what came of it. "What files do I have?" is answered by the
+       * listing, not by "let me look" — so the reply that had to wait for the
+       * result is spoken once the first sentence is out of the way. Skipped
+       * when the user has cut in, since they are now asking something else.
+       */
+      const followUp = await acting;
+      if (followUp && !interrupted) await speaker.speak(followUp);
     } catch (error) {
       showToast(error.message.slice(0, 60), true, 4000);
     } finally {

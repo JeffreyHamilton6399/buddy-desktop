@@ -155,11 +155,18 @@ class History {
    * and so a follow-up question ("what about the top left?") still has it in
    * context. They are capped per message in server.js before they get this far.
    */
-  append(conversation, role, content, images) {
+  /**
+   * `kind` marks a turn that is not something a person said. The only one so
+   * far is 'action' — what came back from a file being read or a folder listed,
+   * which the model has to see to be able to use, but which was never typed by
+   * anybody and must not be drawn as though it were.
+   */
+  append(conversation, role, content, images, kind) {
     conversation.messages.push({
       role,
       content,
       ...(Array.isArray(images) && images.length ? { images } : {}),
+      ...(kind ? { kind } : {}),
       at: new Date().toISOString(),
     });
     if (conversation.messages.length > MAX_STORED_MESSAGES) {
@@ -168,7 +175,10 @@ class History {
     forgetOldPictures(conversation);
     conversation.updatedAt = new Date().toISOString();
 
-    if (conversation.title === 'New chat' && role === 'user') {
+    // A chat is named after what was asked, never after what an action returned
+    // — otherwise a conversation that opened by listing a folder is filed under
+    // the first filename in it.
+    if (conversation.title === 'New chat' && role === 'user' && !kind) {
       conversation.title = History.titleFrom(content);
     }
   }
@@ -177,7 +187,10 @@ class History {
   list() {
     return [...this.cache.values()]
       .map((conversation) => {
-        const lastMessage = conversation.messages[conversation.messages.length - 1];
+        // The preview is what was last *said*, so an action's output is skipped
+        // — a chat whose newest turn is a folder listing should not be
+        // previewed with a filename out of the middle of it.
+        const lastMessage = [...conversation.messages].reverse().find((message) => !message.kind);
         return {
           id: conversation.id,
           title: conversation.title,

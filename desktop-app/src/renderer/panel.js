@@ -396,27 +396,104 @@ export function initPanel() {
    * annoying, but not knowing which of your programs opened it is worse — so the
    * action is always written down, whether it worked or was refused.
    */
-  async function performAction(payload) {
-    if (payload.actionRefused) {
-      addMessage('note', payload.actionRefused);
-      return;
-    }
-    if (!payload.action) return;
+  /**
+   * How many actions one question may set off.
+   *
+   * Each result goes back to the model, which may ask for another thing, so
+   * without a ceiling a model that misreads its own output can read the same
+   * file until somebody closes the window. Three is enough for the chains that
+   * are actually useful — list a folder, read the interesting file, answer —
+   * and short enough that a loop is over before it is annoying.
+   */
+  const MAX_CHAINED_ACTIONS = 3;
 
-    const note = addMessage('note', `About to ${payload.action.description}…`);
+  /**
+   * Do the thing, then tell the model what happened.
+   *
+   * The second half is the point. The result used to go only to the transcript,
+   * so Buddy could read a file and still not know what was in it — "read my
+   * shopping list and tell me what's missing" read the list and then answered
+   * from nothing. Handing the result back and letting it take another turn is
+   * what makes an action worth having.
+   *
+   * @returns {Promise<object|null>} what came back, for the caller to feed on
+   */
+  async function runOneAction(action) {
+    const note = addMessage('note', `About to ${action.description}…`);
     try {
-      const result = await window.buddy.runAction(payload.action);
+      const result = await window.buddy.runAction(action);
       if (!result || !result.ok) {
-        note.textContent = `Couldn't do that: ${(result && result.error) || 'unknown'}`;
-        return;
+        const error = (result && result.error) || 'unknown';
+        note.textContent = `Couldn't do that: ${error}`;
+        return { ok: false, error, name: action.name, description: action.description };
       }
-      note.textContent = `${payload.action.done}.`;
+      note.textContent = `${action.done}.`;
       // Reading a file or listing a folder produces something to look at, and
       // a write says where the old version went. Shown as its own block rather
       // than crammed into the note, because it can be a whole file.
       if (result.detail) addMessage('note', result.detail);
+      return { ok: true, detail: result.detail || '', name: action.name, description: action.description };
     } catch (error) {
       note.textContent = `Couldn't do that: ${error.message}`;
+      return { ok: false, error: error.message, name: action.name, description: action.description };
+    }
+  }
+
+  /**
+   * Carry out whatever the reply asked for, feed the answer back, and keep
+   * going while the model still wants something — up to the ceiling above.
+   */
+  async function performAction(payload) {
+    if (payload.actionRefused) addMessage('note', payload.actionRefused);
+
+    let current = payload;
+    for (let step = 0; step < MAX_CHAINED_ACTIONS; step++) {
+      if (!current.action) return;
+
+      const result = await runOneAction(current.action);
+      if (!result) return;
+
+      // The follow-up is a whole turn of its own: the model sees the result and
+      // writes a real answer, which streams into the panel like any other.
+      const typingRow = addTyping();
+      const liveBubble = typingRow.querySelector('.bubble');
+      let live = '';
+      let painting = false;
+      const paint = () => {
+        painting = false;
+        liveBubble.innerHTML = renderMarkdown(live);
+        scrollToEnd();
+      };
+
+      try {
+        current = await streamChat(
+          { messages: [], sessionId, actionResult: result },
+          {
+            onDelta: (piece) => {
+              if (!piece) return;
+              live += piece;
+              if (painting) return;
+              painting = true;
+              requestAnimationFrame(paint);
+            },
+          }
+        );
+        typingRow.remove();
+        setSession(current.sessionId || sessionId);
+        if (current.reply) addMessage('buddy', current.reply, { markdown: true });
+        if (current.actionRefused) addMessage('note', current.actionRefused);
+        speak(current.reply);
+      } catch (error) {
+        typingRow.remove();
+        addMessage('error', error.message);
+        return;
+      }
+    }
+
+    // Still asking after the ceiling. Say so rather than silently dropping it —
+    // "it stopped halfway through" with no explanation is the worse failure.
+    if (current.action) {
+      addMessage('note', `Stopping after ${MAX_CHAINED_ACTIONS} steps — ask again if there is more to do.`);
     }
   }
 
@@ -530,6 +607,11 @@ export function initPanel() {
       setSession(chat.id);
       messages.replaceChildren();
       for (const message of chat.messages) {
+        // An action's result is a turn the model needed, not one anybody said.
+        // Drawing it would put the raw framing — instructions and all — in the
+        // transcript as though the user had typed it; the reply that follows
+        // already carries whatever came of it.
+        if (message.kind === 'action') continue;
         if (message.role === 'assistant') addMessage('buddy', message.content, { markdown: true });
         else addMessage('user', message.content, { images: message.images || [] });
       }
