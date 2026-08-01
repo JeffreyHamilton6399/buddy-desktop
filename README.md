@@ -126,6 +126,7 @@ and not a sign that anything is wrong.
 | OS | What you'll see | What to do |
 | --- | --- | --- |
 | **macOS** | “Buddy can't be opened because it is from an unidentified developer” — or “Buddy is damaged” | Right-click the app → **Open** (don't double-click). If it claims the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Buddy.app` |
+| **macOS**, again | A prompt asking for the microphone | Allow it, or the wake word cannot work. macOS gates the microphone itself, separately from the app — if you decline, it is re-enabled under *System Settings → Privacy & Security → Microphone*, not in Buddy. |
 | **Windows** | SmartScreen: “Windows protected your PC” | **More info** → **Run anyway** |
 | **Linux** | Nothing happens when you click the AppImage | `chmod +x Buddy-*.AppImage` then run it |
 
@@ -355,8 +356,20 @@ deliberate for now: the alternative rule quietly overwrote "their daughter goes 
 ### Using Buddy
 
 - **Click the orb** to open the panel, or **drag it** anywhere; it remembers where you left it.
-  Click the tray/menu-bar icon to toggle the panel.
+  Click the tray/menu-bar icon to toggle the panel. **Clicking it while Buddy is talking stops it.**
 - **Say “Hey Buddy”** to open it hands-free. Ask in the same breath to skip the greeting.
+- **Two keys work from anywhere**, over a full-screen window, without needing to be heard:
+
+  | | Windows · Linux | macOS |
+  | --- | --- | --- |
+  | Open Buddy, ready to type | `Ctrl`+`Shift`+`Space` | `⌘`+`⇧`+`Space` |
+  | Stop talking | `Ctrl`+`Shift`+`.` | `⌘`+`⌃`+`.` |
+
+  macOS gets a different second one because `⌘`+`⇧`+`.` is Finder's show-hidden-files, and a global
+  shortcut is taken from every other program on the machine. Both are listed in the tray menu and
+  under **Settings → Speech** so you do not have to remember them. On Linux under **Wayland** they
+  will not register at all — the compositor owns global shortcuts and no application can claim them;
+  the tray and the orb still work, and the log says so rather than blaming another program.
 - **Click Buddy's name** in the top-left for settings.
 - **Type** and press Enter, or **tap the mic** to record a voice message (tap again to send it).
 - **☰ opens your saved chats**; **+ starts a new one**. Escape closes whatever is over the chat.

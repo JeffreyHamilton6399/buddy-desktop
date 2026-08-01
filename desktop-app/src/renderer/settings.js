@@ -1462,7 +1462,9 @@ export function createSettings({ onChanged, onRequestMicTest, getWakeEnabled } =
     const shift = mac ? '⇧' : 'Shift';
     const rows = [
       [[mod, shift, 'Space'], `Open ${buddyName()}, ready to type`],
-      [[mod, shift, '.'], 'Stop talking'],
+      // Cmd+Shift+. is Finder's show-hidden-files, so macOS gets a different
+      // key — see SILENCE_KEY in main.js, which this has to stay in step with.
+      [mac ? ['⌘', '⌃', '.'] : [mod, shift, '.'], 'Stop talking'],
     ];
 
     const list = $('shortcut-list');

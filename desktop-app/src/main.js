@@ -449,6 +449,18 @@ function showPanel() {
   if (!panelWindow || panelWindow.isDestroyed()) createPanelWindow();
   positionPanelNearOrb();
   panelWindow.show();
+
+  /**
+   * Focusing the window is not enough on macOS.
+   *
+   * The dock icon is hidden, which makes Buddy an accessory application, and an
+   * accessory application does not become the *active* one just because one of
+   * its windows was focused. So the panel would appear, the cursor would be in
+   * the box, and every key you typed would go to whatever you were using
+   * before — which is the worst possible version of this, because it looks like
+   * it worked. `steal` is what actually hands over the keyboard.
+   */
+  if (process.platform === 'darwin') app.focus({ steal: true });
   panelWindow.focus();
 }
 
@@ -469,6 +481,9 @@ function hidePanel() {
  * three-key combinations, because a global shortcut is taken away from every
  * other program on the machine and a common one would be theft.
  */
+/** See SHORTCUTS: the same job, a different key where the obvious one is taken. */
+const SILENCE_KEY = process.platform === 'darwin' ? 'Command+Control+.' : 'CommandOrControl+Shift+.';
+
 const SHORTCUTS = {
   // Summon: opens the panel and puts the cursor in the box.
   'CommandOrControl+Shift+Space': () => {
@@ -478,11 +493,19 @@ const SHORTCUTS = {
       panelWindow.webContents.send('buddy:focus-composer');
     }
   },
-  // Shut up: the one that has to work while Buddy is talking over you.
-  // The key is written as the character. Electron has no "Period" key name and
-  // throws on one, which is how this first shipped and took the app down with
-  // it — see registerShortcuts.
-  'CommandOrControl+Shift+.': () => {
+  /**
+   * Shut up: the one that has to work while Buddy is talking over you.
+   *
+   * The key is written as the character. Electron has no "Period" key name and
+   * throws on one, which is how this first shipped and took the app down with
+   * it — see registerShortcuts.
+   *
+   * Different on macOS, because a global shortcut is taken from every other
+   * program on the machine and Cmd+Shift+. is Finder's show-hidden-files. A
+   * background assistant quietly breaking that for as long as it runs is the
+   * sort of theft nobody would connect back to the thing that caused it.
+   */
+  [SILENCE_KEY]: () => {
     eachRenderer((window) => window.webContents.send('buddy:silence'));
   },
 };
@@ -506,7 +529,14 @@ function registerShortcuts() {
   for (const [accelerator, handler] of Object.entries(SHORTCUTS)) {
     try {
       if (!globalShortcut.register(accelerator, handler)) {
-        console.warn(`[buddy] could not register ${accelerator} — another program has it`);
+        /**
+         * Deliberately does not name a cause. A conflict with another program
+         * is the usual one, but under Wayland global shortcuts are mediated by
+         * the compositor and Electron cannot take them at all — and telling a
+         * Linux user to go hunting for the program that stole their key, when
+         * no program did, is worse than telling them nothing.
+         */
+        console.warn(`[buddy] ${accelerator} is not available on this system — the tray and the orb still work`);
       }
     } catch (error) {
       console.warn(`[buddy] could not register ${accelerator} — ${error.message}`);
@@ -602,7 +632,7 @@ function buildTrayMenu() {
     },
     {
       label: 'Stop talking',
-      accelerator: 'CommandOrControl+Shift+.',
+      accelerator: SILENCE_KEY,
       registerAccelerator: false,
       click: () => eachRenderer((window) => window.webContents.send('buddy:silence')),
     },
@@ -1068,6 +1098,54 @@ function registerIpc() {
 
 // ── startup ───────────────────────────────────────────────────────────────
 
+/**
+ * Ask macOS for the microphone, which is a separate permission from Chromium's.
+ *
+ * grantMediaPermissions below answers the *renderer's* request. macOS gates the
+ * device itself, in TCC, and that gate is only opened by asking — so without
+ * this the prompt never appears, getUserMedia fails, and the wake word and
+ * voice messages simply do not work on a Mac. The Info.plist string that
+ * explains why is already in the build config; nothing was ever triggering it.
+ *
+ * Asked at launch rather than at first use because the orb opens the microphone
+ * as soon as it starts, so first use *is* launch. A refusal is not an error:
+ * the renderer already treats a microphone it cannot open as a reason to turn
+ * the wake word off and say so, which is the right outcome either way.
+ *
+ * Windows and Linux have no equivalent call. Windows does report a status, so
+ * it is read there too — "the user switched the microphone off for all apps" is
+ * worth a line in the log, being otherwise indistinguishable from a mic that is
+ * simply not working.
+ */
+async function ensureMicrophoneAccess() {
+  const { systemPreferences } = require('electron');
+  if (typeof systemPreferences.getMediaAccessStatus !== 'function') return;
+
+  let status;
+  try {
+    status = systemPreferences.getMediaAccessStatus('microphone');
+  } catch {
+    return; // not a platform that tracks this
+  }
+
+  if (status === 'granted') return;
+  if (status === 'denied' || status === 'restricted') {
+    console.warn(
+      `[buddy] the system is refusing the microphone (${status}) — ` +
+        'the wake word cannot work until it is allowed in system settings'
+    );
+    return;
+  }
+
+  if (process.platform !== 'darwin') return;
+  try {
+    const granted = await systemPreferences.askForMediaAccess('microphone');
+    if (!granted) console.warn('[buddy] microphone access was declined — the wake word will stay off');
+  } catch (error) {
+    console.warn('[buddy] could not ask for the microphone:', error.message);
+  }
+}
+
 function grantMediaPermissions() {
   const isOurs = (url) => typeof url === 'string' && url.startsWith('buddy://');
 
@@ -1127,6 +1205,8 @@ if (!app.requestSingleInstanceLock()) {
 
       const configured = await startServer();
       if (process.platform === 'darwin' && app.dock) app.dock.hide();
+      // Before any window opens a microphone, which on macOS is immediately.
+      await ensureMicrophoneAccess();
 
       if (!configured) {
         // The panel starts hidden, so first-run setup needs a window of its own.
